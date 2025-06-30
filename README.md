@@ -8,7 +8,7 @@
 ## 📁 프로젝트 구조
 
 ```
-/SUPPORTHUB-BACKEND
+/supporthub-backend
 ├── build.gradle            # Gradle 빌드 설정
 ├── settings.gradle
 ├── src/
@@ -26,7 +26,7 @@
 
 ### IntelliJ에서 실행
 
-1. `backend` 폴더를 열기
+1. `supporthub-backend` 폴더를 열기
 2. `SupportHubApplication.java` 실행
 
 ### CLI로 실행
@@ -36,7 +36,6 @@
 ```
 
 - 기본 포트: `http://localhost:8080`
-
 - DB 및 환경 설정은 `application.yml` 또는 `application-local.yml`로 구성
 
 ---
@@ -45,7 +44,7 @@
 
 - CORS 허용 주소: `http://localhost:3000` (프론트는 Next.js 사용)
 - RESTful API는 `http://localhost:8080/api` 형태로 구성
-- 프론트에서는 `.env.local`을 통해 API 주소를 지정함:
+- 프론트에서는 `.env.local`을 통해 API 주소를 지정:
 
 ```env
 NEXT_PUBLIC_API_URL=http://localhost:8080/api
@@ -55,22 +54,22 @@ NEXT_PUBLIC_API_URL=http://localhost:8080/api
 
 ## 🛡️ 브랜치 전략
 
-| 브랜치                    | 설명                                   |
-| ------------------------- | -------------------------------------- |
-| `main`                    | 운영 배포 브랜치 (🔒 보호)             |
-| `development`             | 통합 개발 브랜치 (🔒 보호)             |
-| `feat/{ticket-id}/{desc}` | 기능 단위 브랜치 (`feat/23/jwt-login`) |
+| 브랜치          | 설명                                |
+| --------------- | ----------------------------------- |
+| `main`          | 운영 배포 브랜치 (🔒 보호)          |
+| `dev`           | 통합 개발 브랜치 (🔒 보호)          |
+| `feat/{기능명}` | 기능 단위 브랜치 (`feat/jwt-login`) |
 
-> `main`, `development`는 직접 push 금지  
-> 반드시 PR을 통해 병합하며 코드 리뷰 필수
+> `main`, `dev`는 직접 push 금지  
+> 반드시 PR(Pull Request)을 통해 병합하며 코드 리뷰 필수
 
 ---
 
 ## 📝 PR 작성 규칙
 
-- PR 제목 형식: `[티켓ID] 작업 내용`
-- 예: `[#11] JWT 로그인 기능 구현`
-- PR 생성 시 티켓 상태 자동 업데이트
+- PR 제목 형식: `[기능명] 작업 내용`
+- 예: `[Auth] JWT 로그인 기능 구현`
+- PR 생성 시 관련 커밋 또는 기능에 대한 설명 포함
 
 ---
 
@@ -106,7 +105,7 @@ git commit -m "feat: 회원가입 API 구현"
 
 ## 🔐 보안 설정 (GitHub)
 
-- `main`, `development` 브랜치 보호 설정:
+- `main`, `dev` 브랜치 보호 설정:
 
   - `Allow force pushes` ❌
   - `Allow deletions` ❌
@@ -114,6 +113,12 @@ git commit -m "feat: 회원가입 API 구현"
 
 - 레포지토리는 기본 `private` 유지
 - DB 비밀번호, 시크릿 키 등은 환경파일에서 관리하고 절대 커밋 금지
+
+---
+
+## 📘 API 명세서
+
+- Swagger UI: [http://localhost:8080/swagger-ui/index.html](http://localhost:8080/swagger-ui/index.html)
 
 ---
 
@@ -155,8 +160,7 @@ git commit -m "feat: 회원가입 API 구현"
 ## 📞 문의 및 연락
 
 - 팀장: 윤상우
-- GitHub: https://github.com/ICC-SupportHub
-- Notion: (팀 노션 링크 삽입)
-- 이메일: example@email.com
+- GitHub: https://github.com/ICC-SupportHub/SupportHub-backend
+- Notion: https://www.notion.so/222672d5ce4680a0848bf36722bea3aa?v=222672d5ce4680af9968000cb3750e20&source=copy_link
 
 ---
