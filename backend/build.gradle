@@ -4,12 +4,12 @@ plugins {
 	id 'io.spring.dependency-management' version '1.1.7'
 }
 
-group = 'com.example'
+group = 'com.supporthub'          // ← 패키지와 맞추면 깔끔
 version = '0.0.1-SNAPSHOT'
 
 java {
 	toolchain {
-		languageVersion = JavaLanguageVersion.of(17)
+		languageVersion = JavaLanguageVersion.of(17) // Boot 3.5.x는 17+ OK
 	}
 }
 
@@ -24,15 +24,37 @@ repositories {
 }
 
 dependencies {
-	implementation 'org.springframework.boot:spring-boot-starter-data-jpa'
+	// --- Spring ---
 	implementation 'org.springframework.boot:spring-boot-starter-web'
-	compileOnly 'org.projectlombok:lombok'
-	developmentOnly 'org.springframework.boot:spring-boot-devtools'
+	implementation 'org.springframework.boot:spring-boot-starter-data-jpa'
+	implementation 'org.springframework.boot:spring-boot-starter-security'   // ★ 추가
+	implementation 'org.springframework.boot:spring-boot-starter-validation' // ★ 추가 (@Valid 등)
+
+	// --- DB ---
 	runtimeOnly 'com.mysql:mysql-connector-j'
+
+	// --- JWT (jjwt 0.11.x) ★ 추가 ---
+	implementation 'io.jsonwebtoken:jjwt-api:0.11.5'
+	runtimeOnly 'io.jsonwebtoken:jjwt-impl:0.11.5'
+	runtimeOnly 'io.jsonwebtoken:jjwt-jackson:0.11.5' // JSON 직렬화
+
+	// --- Lombok ---
+	compileOnly 'org.projectlombok:lombok'
 	annotationProcessor 'org.projectlombok:lombok'
+
+	// --- DevTools (개발용) ---
+	developmentOnly 'org.springframework.boot:spring-boot-devtools'
+
+	// --- Test ---
 	testImplementation 'org.springframework.boot:spring-boot-starter-test'
 	testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
 }
+
+/* (선택) Swagger(OpenAPI) 쓰면 아래 추가
+dependencies {
+    implementation 'org.springdoc:springdoc-openapi-starter-webmvc-ui:2.6.0'
+}
+*/
 
 tasks.named('test') {
 	useJUnitPlatform()

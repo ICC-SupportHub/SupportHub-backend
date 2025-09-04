@@ -27,3 +27,7 @@ bin/
 
 ### Mac OS ###
 .DS_Store
+
+# 민감 정보
+application.yml
+application-*.yml
