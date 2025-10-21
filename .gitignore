@@ -1,0 +1,97 @@
+# ======================================
+# 🌐 FRONTEND (Next.js / Node)
+# ======================================
+
+# dependencies
+node_modules/
+.pnp
+.pnp.*
+.yarn/*
+!.yarn/patches
+!.yarn/plugins
+!.yarn/releases
+!.yarn/versions
+
+# testing
+coverage/
+
+# next.js build output
+.next/
+out/
+
+# production
+build/
+
+# misc
+.DS_Store
+*.pem
+
+# debug logs
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# env files (never commit real secrets)
+.env
+.env.*
+!.env.example
+
+# vercel deployment folder
+.vercel
+
+# typescript
+*.tsbuildinfo
+next-env.d.ts
+
+# ======================================
+# ☕ BACKEND (Spring Boot / Gradle / Java)
+# ======================================
+
+HELP.md
+.gradle
+build/
+!gradle/wrapper/gradle-wrapper.jar
+!**/src/main/**/build/
+!**/src/test/**/build/
+
+# STS / Eclipse
+.apt_generated
+.classpath
+.factorypath
+.project
+.settings
+.springBeans
+.sts4-cache
+bin/
+!**/src/main/**/bin/
+!**/src/test/**/bin/
+
+# IntelliJ IDEA
+.idea
+*.iws
+*.iml
+*.ipr
+out/
+!**/src/main/**/out/
+!**/src/test/**/out/
+
+# NetBeans
+/nbproject/private/
+/nbbuild/
+/dist/
+/nbdist/
+/.nb-gradle/
+
+# VS Code
+.vscode/
+
+# OS specific
+Thumbs.db
+
+# ======================================
+# 🔒 Common sensitive configs
+# ======================================
+
+**/application-*.yml
+**/application-*.properties
