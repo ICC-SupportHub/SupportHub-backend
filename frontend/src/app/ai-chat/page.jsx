@@ -21,10 +21,11 @@ import {
   CopyIcon,
   CheckIcon,
   BookOpenIcon,
-  BrainIcon,
 } from 'lucide-react'
 import { useAuth } from '@/contexts/AuthContext'
-import { conversationService } from '@/lib/firestore'
+
+// ✅ Firestore 서비스 제거 → 백엔드 API만 사용
+import { apiChat } from '@/lib/api'
 
 function ChatPageContent() {
   const scrollAreaRef = useRef(null)
@@ -45,7 +46,7 @@ function ChatPageContent() {
       loneliness:
         '안녕하세요! 외로움을 느끼고 계시는군요. 혼자라는 느낌이 들 때가 있죠. 제가 함께 있어드릴게요. 어떤 부분이 가장 외로우신가요? 😊',
       stress:
-        '안녕하세요! 스트레스를 받고 계시는군요. 일상의 압박감이 힘드실 때가 있죠. 어떤 일이 가장 스트레스가 되시나요? 함께 풀어보아요. 😌',
+        '안녕하세요! 스트레스를 받고 계시는군요. 일상의 압박감이 힘드실 때가 있죠. 어떤 일이 가장 스트레스를 되시나요? 함께 풀어보아요. 😌',
       'self-criticism':
         '안녕하세요! 자신을 너무 혹독하게 대하고 계시는군요. 완벽하지 않아도 괜찮아요. 어떤 부분에서 자신을 비난하고 계신가요? 🤗',
       depression:
@@ -58,7 +59,7 @@ function ChatPageContent() {
     return initialMessages[topic] || initialMessages.general
   }
 
-  // 더미 메시지 상태
+  // 대화 로그(초기 안내 1개)
   const [messages, setMessages] = useState([
     {
       id: 'welcome',
@@ -70,223 +71,105 @@ function ChatPageContent() {
   const [input, setInput] = useState('')
   const [isLoading, setIsLoading] = useState(false)
 
-  // 간단 감정 추출(일기 피드백용)
-  const detectEmotion = (text) => {
-    const emotions = {
-      happy: [
-        '기쁘',
-        '행복',
-        '좋',
-        '즐거',
-        '신나',
-        '웃',
-        '😊',
-        '😄',
-        '😃',
-        '만족',
-        '감사',
-      ],
-      joy: ['즐거', '신나', '😆', '😃', '웃음', '재미', '유쾌', '상쾌'],
-      sad: ['슬프', '힘들', '지치', '😢', '😭', '절망', '허전'],
-      depression: ['우울', '😔', '무기력', '의욕상실', '절망적', '침울'],
-      loneliness: ['외로', '혼자', '고립', '💙', '허전', '쓸쓸', '고독'],
-      angry: ['화나', '짜증', '분노', '열받', '😠', '😡', '🤬', '분통'],
-      stress: [
-        '스트레스',
-        '압박',
-        '피로',
-        '번아웃',
-        '과로',
-        '😤',
-        '답답',
-        '부담',
-      ],
-      anxiety: [
-        '불안',
-        '걱정',
-        '긴장',
-        '😟',
-        '😰',
-        '😨',
-        '초조',
-        '두려움',
-        '공황',
-      ],
-      'self-criticism': [
-        '자책',
-        '비난',
-        '죄책감',
-        '자존감',
-        '완벽주의',
-        '😞',
-        '자기비난',
-        '자기혐오',
-      ],
-      neutral: ['그냥', '보통', '평범', '괜찮', '😐', '😑', '일반'],
-      general: ['일반', '보통', '평범', '그냥', '💭', '대화'],
-    }
-    let detectedEmotion = 'neutral'
-    let maxScore = 0
-    Object.entries(emotions).forEach(([emotion, keywords]) => {
-      const score = keywords.reduce(
-        (count, keyword) =>
-          count + (text.toLowerCase().includes(keyword) ? 1 : 0),
-        0
-      )
-      if (score > maxScore) {
-        maxScore = score
-        detectedEmotion = emotion
-      }
-    })
-    return detectedEmotion
-  }
-
-  // 감정 라벨 변환
-  const getEmotionLabel = (emotion) => {
-    const labels = {
-      happy: '기쁨 😊',
-      joy: '즐거움 😆',
-      sad: '슬픔 😢',
-      depression: '우울감 😔',
-      loneliness: '외로움 💙',
-      angry: '화남 😠',
-      stress: '스트레스 😤',
-      anxiety: '불안감 😟',
-      'self-criticism': '자기비난 😞',
-      neutral: '평온 😐',
-      general: '일반 💭',
-    }
-    return labels[emotion] || '보통 😐'
-  }
-
   const handleUserInput = (e) => {
     setInput(e.target.value)
   }
 
-  // 감정별 공감 응답 생성
-  const generateEmotionalResponse = (userMessage) => {
-    const emotion = detectEmotion(userMessage)
-    const responses = {
-      happy: [
-        '정말 기쁜 일이 있으신 것 같아요! 😊 그런 기쁜 마음을 함께 나눠주셔서 감사해요. 더 많은 좋은 일들이 찾아올 거예요!',
-        '와, 정말 기쁘시겠어요! 😄 그런 긍정적인 에너지가 느껴져요. 기쁜 일을 더 오래 기억하고 간직하세요.',
-        '기쁜 마음이 전해져요! 😊 그런 행복한 순간들을 소중히 간직하세요. 제가 함께 기뻐해요!',
-      ],
-      joy: [
-        '정말 즐거우시겠어요! 😆 그런 유쾌한 에너지가 느껴져요. 즐거운 마음을 더 오래 간직하세요!',
-        '와, 신나는 일이 있으셨나요! 😃 그런 상쾌한 기분이 전해져요. 제가 함께 즐거워해요!',
-        '즐거운 마음이 느껴져요! 😆 그런 유쾌한 순간들을 소중히 간직하세요.',
-      ],
-      sad: [
-        '마음이 많이 아프시겠어요. 😢 그런 감정을 느끼는 것은 당연해요. 제가 함께 있어드릴게요. 천천히 말씀해 주세요.',
-        '힘든 시간을 보내고 계시는군요. 🤗 외로우지 않아요, 제가 들어드릴게요. 언제든 말씀해 주세요.',
-        '슬픈 마음이 느껴져요. 😔 그런 감정을 표현해주셔서 고마워요. 제가 함께 있어드릴게요.',
-      ],
-      depression: [
-        '우울한 마음이 느껴져요. 😔 그런 감정을 느끼는 것은 당연해요. 제가 함께 있어드릴게요.',
-        '마음이 무겁고 우울하신가요? 🤗 그런 시간이 있을 수 있어요. 제가 들어드릴게요.',
-        '우울한 감정이 이해돼요. 😔 함께 차분히 이야기해보아요. 제가 함께 있어드릴게요.',
-      ],
-      loneliness: [
-        '외로우신 마음이 느껴져요. 💙 혼자라는 느낌이 들 때가 있죠. 제가 함께 있어드릴게요.',
-        '외로움을 느끼고 계시는군요. 🤗 외로우지 않아요, 제가 들어드릴게요. 언제든 말씀해 주세요.',
-        '쓸쓸한 마음이 이해돼요. 💙 그런 감정을 표현해주셔서 고마워요. 제가 함께 있어드릴게요.',
-      ],
-      angry: [
-        '화가 나실 만한 일이 있었군요. 😌 그런 감정을 느끼는 것은 자연스러워요. 천천히 말씀해 주세요.',
-        '짜증나시는 일이 있으셨나요? 😌 화가 날 때는 깊은 숨을 쉬어보세요. 제가 들어드릴게요.',
-        '분노가 느껴져요. 😌 그런 감정을 가질 수 있어요. 함께 차분히 정리해보아요.',
-      ],
-      stress: [
-        '스트레스를 많이 받고 계시는군요. 😤 그런 압박감이 힘드실 수 있어요. 함께 풀어보아요.',
-        '피로하고 스트레스가 많으시겠어요. 😌 그런 감정을 느끼는 것은 당연해요. 제가 들어드릴게요.',
-        '압박감이 느껴져요. 😤 스트레스가 많으시겠어요. 함께 차분히 정리해보아요.',
-      ],
-      anxiety: [
-        '불안하신 마음을 이해해요. 🧘‍♀️ 함께 차분히 정리해보아요. 어떤 것이 가장 걱정되시나요?',
-        '긴장되시는군요. 😌 불안할 때는 천천히 호흡을 해보세요. 제가 함께 있어드릴게요.',
-        '걱정이 많으시군요. 😟 그런 마음이 이해돼요. 함께 하나씩 정리해보아요.',
-      ],
-      'self-criticism': [
-        '자신을 너무 혹독하게 대하고 계시는군요. 😞 완벽하지 않아도 괜찮아요. 제가 들어드릴게요.',
-        '자책하는 마음이 느껴져요. 🤗 자신을 비난하지 마세요. 제가 함께 있어드릴게요.',
-        '자기비난이 심하시는군요. 😞 그런 감정을 느끼는 것은 당연해요. 함께 이야기해보아요.',
-      ],
-      neutral: [
-        '편하게 말씀해 주세요. 🙂 제가 들어드릴게요. 어떤 일이든 괜찮아요.',
-        '무슨 생각을 하고 계시나요? 😊 편하게 나누어 주세요. 제가 함께 있어드릴게요.',
-        '오늘 하루 어떠셨나요? 😊 편하게 이야기해 주세요.',
-      ],
-      general: [
-        '편하게 말씀해 주세요. 💭 제가 들어드릴게요. 어떤 이야기든 괜찮아요.',
-        '무슨 생각을 하고 계시나요? 😊 자유롭게 나누어 주세요. 제가 함께 있어드릴게요.',
-        '오늘 하루 어떠셨나요? 💭 편하게 이야기해 주세요.',
-      ],
-    }
-
-    const emotionResponses = responses[emotion] || responses.neutral
-    return emotionResponses[Math.floor(Math.random() * emotionResponses.length)]
-  }
-
-  // 메시지 전송 처리
+  // ✅ 메시지 전송 처리 (백엔드 권위)
   const handleSubmit = async (e) => {
     e.preventDefault()
     if (!input.trim() || isLoading) return
 
-    const userMessage = {
-      id: Date.now().toString(),
-      role: 'user',
-      content: input,
-      createdAt: new Date(),
+    // 미로그인 시 백엔드가 401을 줄 수 있으므로 안내
+    if (!user) {
+      toast({
+        title: '로그인이 필요합니다',
+        description: '로그인 후 대화를 저장하고 이어서 사용할 수 있어요.',
+        variant: 'destructive',
+      })
     }
 
-    const updatedMessages = [...messages, userMessage]
-    setMessages(updatedMessages)
+    const now = new Date()
+    const userMessage = {
+      id: `${now.getTime()}`,
+      role: 'user',
+      content: input,
+      createdAt: now,
+    }
+
+    // UI에 먼저 사용자 메시지 반영
+    const draft = [...messages, userMessage]
+    setMessages(draft)
     const currentInput = input
     setInput('')
     setIsLoading(true)
 
-    // AI 응답 생성
-    setTimeout(async () => {
-      const aiResponse = {
-        id: (Date.now() + 1).toString(),
-        role: 'assistant',
-        content: generateEmotionalResponse(currentInput),
-        createdAt: new Date(),
+    try {
+      // 1) 대화가 없으면 먼저 생성
+      let cid = currentConversationId
+      if (!cid) {
+        const title = `AI와의 감정 대화 - ${new Date().toLocaleDateString('ko-KR')}`
+        const created = await apiChat.createConversation({
+          title,
+          topic: topic || 'general',
+        })
+        // 응답이 {id} 형태라고 가정 (안전 처리)
+        cid = created?.id || created?.conversationId || created?.data?.id
+        if (!cid) throw new Error('대화 생성 실패')
+        setCurrentConversationId(cid)
       }
 
-      const finalMessages = [...updatedMessages, aiResponse]
-      setMessages(finalMessages)
-      setIsLoading(false)
+      // 2) 사용자 메시지를 서버로 전송 → 서버가 응답 생성 (권장)
+      //    서버 응답 형태를 폭넓게 처리:
+      //    - { message: {id, role, content, createdAt} }
+      //    - { messages: [...] } (대화 전체/추가분)
+      //    - { content: '...' } 등 단건
+      const sent = await apiChat.sendMessage(cid, { content: currentInput })
 
-      // 로그인한 사용자의 경우 대화를 Firebase에 저장
-      if (user && finalMessages.length > 1) {
-        try {
-          if (currentConversationId) {
-            // 기존 대화 업데이트
-            await conversationService.updateConversation(
-              currentConversationId,
-              {
-                messages: finalMessages,
-              }
-            )
-          } else {
-            // 새 대화 저장
-            const conversation = await conversationService.saveConversation(
-              user.uid,
-              {
-                messages: finalMessages,
-                topic: topic || 'general',
-                title: `AI와의 감정 대화 - ${new Date().toLocaleDateString('ko-KR')}`,
-              }
-            )
-            setCurrentConversationId(conversation.id)
-          }
-        } catch (error) {
-          console.error('대화 저장 실패:', error)
+      let assistantMessage = null
+      if (sent?.message) {
+        assistantMessage = sent.message
+      } else if (Array.isArray(sent?.messages)) {
+        // 가장 마지막 메시지를 어시스턴트 응답으로 사용
+        assistantMessage = sent.messages[sent.messages.length - 1]
+      } else if (typeof sent?.content === 'string') {
+        assistantMessage = {
+          id: `${Date.now() + 1}`,
+          role: 'assistant',
+          content: sent.content,
+          createdAt: new Date(),
         }
       }
-    }, 1000)
+
+      // 서버가 응답을 주지 않는 경우(임시): 안내 메시지로 대체
+      if (!assistantMessage) {
+        assistantMessage = {
+          id: `${Date.now() + 1}`,
+          role: 'assistant',
+          content:
+            '서버에서 응답을 받지 못했어요. 잠시 후 다시 시도해 주세요.',
+          createdAt: new Date(),
+        }
+      }
+
+      setMessages((prev) => [...prev, assistantMessage])
+    } catch (err) {
+      console.error(err)
+      const msg =
+        err?.message?.includes('401') || err?.message?.includes('403')
+          ? '로그인이 만료되었거나 권한이 없습니다. 다시 로그인해 주세요.'
+          : '메시지 전송 중 문제가 발생했어요. 잠시 후 다시 시도해 주세요.'
+      toast({
+        title: '전송 실패',
+        description: msg,
+        variant: 'destructive',
+      })
+      // 실패 시, 방금 추가한 사용자 메시지를 되돌리고 입력 복원
+      setMessages((prev) => prev.slice(0, -1))
+      setInput(currentInput)
+    } finally {
+      setIsLoading(false)
+    }
   }
 
   const handleShareConversation = async () => {
@@ -301,17 +184,15 @@ function ChatPageContent() {
 
     setIsSharing(true)
     try {
+      // NOTE: 여기 /api/share-conversation 은 Next.js API Route(임시 공유)라 그대로 유지
       const response = await fetch('/api/share-conversation', {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          messages: messages,
+          messages,
           title: `AI와의 감정 대화 - ${new Date().toLocaleDateString('ko-KR')}`,
         }),
       })
-
       const data = await response.json()
 
       if (data.success) {
@@ -481,10 +362,7 @@ function ChatPageContent() {
                 <p className="mt-1 text-xs text-gray-500">
                   {new Date(message.createdAt || Date.now()).toLocaleTimeString(
                     'ko-KR',
-                    {
-                      hour: '2-digit',
-                      minute: '2-digit',
-                    }
+                    { hour: '2-digit', minute: '2-digit' }
                   )}
                 </p>
               </div>
@@ -500,14 +378,8 @@ function ChatPageContent() {
               <div className="rounded-xl bg-gray-100 p-3 dark:bg-gray-700 md:rounded-2xl md:p-4">
                 <div className="flex space-x-1">
                   <div className="h-2 w-2 animate-bounce rounded-full bg-gray-400"></div>
-                  <div
-                    className="h-2 w-2 animate-bounce rounded-full bg-gray-400"
-                    style={{ animationDelay: '0.1s' }}
-                  ></div>
-                  <div
-                    className="h-2 w-2 animate-bounce rounded-full bg-gray-400"
-                    style={{ animationDelay: '0.2s' }}
-                  ></div>
+                  <div className="h-2 w-2 animate-bounce rounded-full bg-gray-400" style={{ animationDelay: '0.1s' }}></div>
+                  <div className="h-2 w-2 animate-bounce rounded-full bg-gray-400" style={{ animationDelay: '0.2s' }}></div>
                 </div>
               </div>
             </div>
@@ -548,24 +420,11 @@ function ChatPageContent() {
             <Button
               variant="outline"
               onClick={() => {
-                // 대화 내용을 감정 일기 페이지로 전달
-                const lastUserMsg = [...messages]
-                  .reverse()
-                  .find((m) => m.role === 'user')
-                const detectedEmotion = lastUserMsg
-                  ? detectEmotion(lastUserMsg.content)
-                  : 'neutral'
+                // 최근 사용자 메시지를 감정 일기 페이지로 전달(백엔드 권위 전환 후에도 UI 편의 로직은 유지)
+                const lastUserMsg = [...messages].reverse().find((m) => m.role === 'user')
                 const diaryContent = lastUserMsg?.content || ''
-
-                // URL 파라미터로 감정과 내용 전달
                 const params = new URLSearchParams()
-                if (detectedEmotion !== 'neutral') {
-                  params.set('emotion', detectedEmotion)
-                }
-                if (diaryContent) {
-                  params.set('content', diaryContent)
-                }
-
+                if (diaryContent) params.set('content', diaryContent)
                 router.push(`/emotion-diary?${params.toString()}`)
               }}
               className="flex h-10 w-full items-center gap-1.5 text-xs sm:w-auto md:h-9 md:gap-2 md:text-sm"

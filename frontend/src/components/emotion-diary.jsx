@@ -6,9 +6,8 @@ import { Button } from '@/components/ui/button'
 import { Label } from '@/components/ui/label'
 import { CalendarIcon, LoaderIcon, EditIcon, TrashIcon } from 'lucide-react'
 import { useAuth } from '@/contexts/AuthContext'
-import { diaryService } from '@/lib/firestore'
+import { apiDiary } from '@/lib/api'
 
-// 초기 상태 정의
 const initialEditor = {
   selectedEmotions: [],
   diaryEntry: '',
@@ -22,60 +21,56 @@ const initialList = {
   savedDiaries: [],
   selectedDiary: null,
   showAll: false,
-  isExpanded: false, // 모바일에서 목록 펼침/접힘 상태
+  isExpanded: false,
 }
 
 export default function EmotionDiary() {
   const searchParams = useSearchParams()
   const { user } = useAuth()
 
-  // 작성 관련 상태
   const [editor, setEditor] = useState(initialEditor)
-
-  // 목록 관련 상태
   const [list, setList] = useState(initialList)
 
-  // URL 파라미터에서 감정과 내용을 가져와서 자동 설정
   useEffect(() => {
     const emotion = searchParams.get('emotion')
     const content = searchParams.get('content')
-
-    if (emotion) {
-      setEditor((prev) => ({ ...prev, selectedEmotions: [emotion] }))
-    }
-    if (content) {
-      setEditor((prev) => ({
-        ...prev,
-        diaryEntry: decodeURIComponent(content),
-      }))
-    }
+    if (emotion) setEditor((p) => ({ ...p, selectedEmotions: [emotion] }))
+    if (content)
+      setEditor((p) => ({ ...p, diaryEntry: decodeURIComponent(content) }))
   }, [searchParams])
 
-  // 저장된 일기 목록 로드
   useEffect(() => {
     const loadDiaries = async () => {
-      if (user) {
-        // 로그인한 사용자: Firebase에서 데이터 로드
-        try {
-          const diaries = await diaryService.getUserDiaries(user.uid)
-          setList((prev) => ({ ...prev, savedDiaries: diaries }))
-        } catch (error) {
-          console.error('일기 로드 실패:', error)
-          // Firebase 로드 실패 시 localStorage에서 로드
+      try {
+        if (user) {
+          const diaries = await apiDiary.list()
+          const normalized = Array.isArray(diaries)
+            ? diaries.map((d) => ({
+                id: d.id ?? d.diaryId ?? `${Date.now()}-${Math.random()}`,
+                content: d.content ?? '',
+                emotions: d.emotions ?? (d.emotion ? [d.emotion] : []),
+                feedback: d.feedback ?? '',
+                createdAt:
+                  d.createdAt ?? d.created_at ?? new Date().toISOString(),
+                updatedAt:
+                  d.updatedAt ??
+                  d.updated_at ??
+                  d.createdAt ??
+                  new Date().toISOString(),
+              }))
+            : []
+          setList((p) => ({ ...p, savedDiaries: normalized }))
+        } else {
           const saved = localStorage.getItem('emotion-diaries')
-          if (saved) {
-            setList((prev) => ({ ...prev, savedDiaries: JSON.parse(saved) }))
-          }
+          if (saved)
+            setList((p) => ({ ...p, savedDiaries: JSON.parse(saved) }))
         }
-      } else {
-        // 비로그인 사용자: localStorage에서 데이터 로드
+      } catch {
         const saved = localStorage.getItem('emotion-diaries')
-        if (saved) {
-          setList((prev) => ({ ...prev, savedDiaries: JSON.parse(saved) }))
-        }
+        if (saved)
+          setList((p) => ({ ...p, savedDiaries: JSON.parse(saved) }))
       }
     }
-
     loadDiaries()
   }, [user])
 
@@ -87,117 +82,131 @@ export default function EmotionDiary() {
   })
 
   const handleSaveDiary = async () => {
-    if (editor.selectedEmotions.length > 0 && editor.diaryEntry.trim()) {
-      setEditor((prev) => ({ ...prev, isLoading: true }))
-      try {
-        const response = await fetch('/api/diary-feedback', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            emotions: editor.selectedEmotions,
-            diaryEntry: editor.diaryEntry,
-          }),
-        })
-
-        const data = await response.json()
-        console.log('API 응답:', data)
-
-        if (editor.editingDiary) {
-          // 기존 일기 수정
-          if (user) {
-            // 로그인한 사용자: Firebase에서 수정
-            await diaryService.updateDiary(editor.editingDiary.id, {
-              emotions: editor.selectedEmotions,
-              content: editor.diaryEntry,
-              feedback: data.feedback,
-            })
-          } else {
-            // 비로그인 사용자: localStorage에서 수정
-            const updatedDiaries = list.savedDiaries.map((diary) =>
-              diary.id === editor.editingDiary.id
-                ? {
-                    ...diary,
-                    emotions: editor.selectedEmotions,
-                    content: editor.diaryEntry,
-                    feedback: data.feedback,
-                    updatedAt: new Date().toISOString(),
-                    // 원래 날짜 유지
-                    date: diary.date,
-                    createdAt: diary.createdAt,
-                  }
-                : diary
-            )
-            setList((prev) => ({ ...prev, savedDiaries: updatedDiaries }))
-            localStorage.setItem(
-              'emotion-diaries',
-              JSON.stringify(updatedDiaries)
-            )
-          }
-        } else {
-          // 새 일기 저장
-          if (user) {
-            // 로그인한 사용자: Firebase에 저장
-            const newDiary = await diaryService.saveDiary(user.uid, {
-              emotions: editor.selectedEmotions,
-              content: editor.diaryEntry,
-              feedback: data.feedback,
-            })
-            setList((prev) => ({
-              ...prev,
-              savedDiaries: [newDiary, ...prev.savedDiaries],
-            }))
-          } else {
-            // 비로그인 사용자: localStorage에 저장
-            const newDiary = {
-              id: Date.now().toString(),
-              date: new Date().toISOString(),
-              emotions: editor.selectedEmotions,
-              content: editor.diaryEntry,
-              feedback: data.feedback,
-              createdAt: new Date().toISOString(),
-            }
-            const updatedDiaries = [...list.savedDiaries, newDiary]
-            setList((prev) => ({ ...prev, savedDiaries: updatedDiaries }))
-            localStorage.setItem(
-              'emotion-diaries',
-              JSON.stringify(updatedDiaries)
-            )
-          }
-        }
-
-        // 작성 상태 초기화 (AI 피드백은 유지)
-        console.log('AI 피드백 설정:', data.feedback)
-        setEditor({
-          selectedEmotions: editor.selectedEmotions,
-          diaryEntry: editor.diaryEntry,
-          aiFeedback: data.feedback,
-          isSaved: true,
-          isLoading: false,
-          editingDiary: null,
-        })
-      } catch (error) {
-        setEditor((prev) => ({
-          ...prev,
-          aiFeedback:
-            '피드백을 가져오는 중 오류가 발생했습니다. 다시 시도해 주세요.',
-        }))
-      } finally {
-        setEditor((prev) => ({ ...prev, isLoading: false }))
-      }
-    } else {
-      setEditor((prev) => ({
-        ...prev,
+    if (!(editor.selectedEmotions.length > 0 && editor.diaryEntry.trim())) {
+      setEditor((p) => ({
+        ...p,
         aiFeedback: '감정을 최소 1개 선택하고 일기 내용을 입력해주세요.',
       }))
+      return
+    }
+
+    setEditor((p) => ({ ...p, isLoading: true }))
+    try {
+      // 피드백 생성(Next API Route, 필요시 백엔드 엔드포인트로 대체 가능)
+      const res = await fetch('/api/diary-feedback', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          emotions: editor.selectedEmotions,
+          diaryEntry: editor.diaryEntry,
+        }),
+      })
+      const data = await res.json()
+      const feedback = data?.feedback ?? ''
+
+      if (editor.editingDiary) {
+        if (user) {
+          await apiDiary.update(editor.editingDiary.id, {
+            emotions: editor.selectedEmotions,
+            content: editor.diaryEntry,
+            feedback,
+          })
+          setList((prev) => ({
+            ...prev,
+            savedDiaries: prev.savedDiaries.map((d) =>
+              d.id === editor.editingDiary.id
+                ? {
+                    ...d,
+                    emotions: editor.selectedEmotions,
+                    content: editor.diaryEntry,
+                    feedback,
+                    updatedAt: new Date().toISOString(),
+                  }
+                : d
+            ),
+          }))
+        } else {
+          const updated = list.savedDiaries.map((d) =>
+            d.id === editor.editingDiary.id
+              ? {
+                  ...d,
+                  emotions: editor.selectedEmotions,
+                  content: editor.diaryEntry,
+                  feedback,
+                  updatedAt: new Date().toISOString(),
+                  date: d.date,
+                  createdAt: d.createdAt,
+                }
+              : d
+          )
+          setList((p) => ({ ...p, savedDiaries: updated }))
+          localStorage.setItem('emotion-diaries', JSON.stringify(updated))
+        }
+      } else {
+        if (user) {
+          const created = await apiDiary.create({
+            emotions: editor.selectedEmotions,
+            content: editor.diaryEntry,
+            feedback,
+          })
+          const newDiary = {
+            id: created?.id ?? created?.diaryId ?? `${Date.now()}`,
+            emotions: created?.emotions ?? editor.selectedEmotions,
+            content: created?.content ?? editor.diaryEntry,
+            feedback: created?.feedback ?? feedback,
+            createdAt:
+              created?.createdAt ??
+              created?.created_at ??
+              new Date().toISOString(),
+            updatedAt:
+              created?.updatedAt ??
+              created?.updated_at ??
+              created?.createdAt ??
+              new Date().toISOString(),
+          }
+          setList((p) => ({
+            ...p,
+            savedDiaries: [newDiary, ...p.savedDiaries],
+          }))
+        } else {
+          const newDiary = {
+            id: Date.now().toString(),
+            date: new Date().toISOString(),
+            emotions: editor.selectedEmotions,
+            content: editor.diaryEntry,
+            feedback,
+            createdAt: new Date().toISOString(),
+          }
+          const updated = [...list.savedDiaries, newDiary]
+          setList((p) => ({ ...p, savedDiaries: updated }))
+          localStorage.setItem('emotion-diaries', JSON.stringify(updated))
+        }
+      }
+
+      setEditor({
+        selectedEmotions: editor.selectedEmotions,
+        diaryEntry: editor.diaryEntry,
+        aiFeedback: feedback,
+        isSaved: true,
+        isLoading: false,
+        editingDiary: null,
+      })
+    } catch {
+      setEditor((p) => ({
+        ...p,
+        aiFeedback:
+          '피드백을 가져오는 중 오류가 발생했습니다. 다시 시도해 주세요.',
+      }))
+    } finally {
+      setEditor((p) => ({ ...p, isLoading: false }))
     }
   }
 
   const handleEditDiary = (diary) => {
-    setEditor((prev) => ({
-      ...prev,
+    setEditor((p) => ({
+      ...p,
       editingDiary: diary,
-      selectedEmotions:
-        diary.emotions || (diary.emotion ? [diary.emotion] : []),
+      selectedEmotions: diary.emotions || (diary.emotion ? [diary.emotion] : []),
       diaryEntry: diary.content,
       aiFeedback: diary.feedback,
       isSaved: true,
@@ -207,27 +216,21 @@ export default function EmotionDiary() {
   const handleDeleteDiary = async (diaryId) => {
     try {
       if (user) {
-        // 로그인한 사용자: Firebase에서 삭제
-        await diaryService.deleteDiary(diaryId)
+        await apiDiary.remove(diaryId)
       } else {
-        // 비로그인 사용자: localStorage에서 삭제
-        const updatedDiaries = list.savedDiaries.filter(
-          (diary) => diary.id !== diaryId
-        )
-        localStorage.setItem('emotion-diaries', JSON.stringify(updatedDiaries))
+        const updated = list.savedDiaries.filter((d) => d.id !== diaryId)
+        localStorage.setItem('emotion-diaries', JSON.stringify(updated))
       }
-
-      // UI에서 제거
-      const updatedDiaries = list.savedDiaries.filter(
-        (diary) => diary.id !== diaryId
-      )
-      setList((prev) => ({ ...prev, savedDiaries: updatedDiaries }))
-    } catch (error) {
-      console.error('일기 삭제 실패:', error)
+      setList((p) => ({
+        ...p,
+        savedDiaries: p.savedDiaries.filter((d) => d.id !== diaryId),
+      }))
+    } catch (e) {
+      console.error('일기 삭제 실패:', e)
     }
   }
 
-  const handleNewDiary = () => {
+  const handleNewDiary = () =>
     setEditor({
       selectedEmotions: [],
       diaryEntry: '',
@@ -236,7 +239,6 @@ export default function EmotionDiary() {
       isLoading: false,
       editingDiary: null,
     })
-  }
 
   const getEmotionLabel = (emotion) => {
     const labels = {
@@ -258,7 +260,7 @@ export default function EmotionDiary() {
   const getEmotionsLabel = (emotions) => {
     if (!emotions || emotions.length === 0) return '감정 없음'
     if (emotions.length === 1) return getEmotionLabel(emotions[0])
-    return emotions.map((emotion) => getEmotionLabel(emotion)).join(', ')
+    return emotions.map(getEmotionLabel).join(', ')
   }
 
   const emotions = [
@@ -295,14 +297,11 @@ export default function EmotionDiary() {
       {/* Content */}
       <div className="flex-1 overflow-auto">
         <div className="flex h-full flex-col md:flex-row">
-          {/* 일기 작성 영역 */}
+          {/* 작성 */}
           <div className="flex-1 overflow-auto p-4 md:p-6">
             <div className="mx-auto max-w-2xl space-y-4 md:space-y-6">
               <div>
-                <Label
-                  htmlFor="emotion-select"
-                  className="mb-3 block text-sm md:text-base"
-                >
+                <Label htmlFor="emotion-select" className="mb-3 block text-sm md:text-base">
                   오늘의 감정은 어떤가요? (최대 3개까지 선택 가능)
                 </Label>
                 <div className="flex flex-wrap gap-2 md:gap-3">
@@ -310,39 +309,22 @@ export default function EmotionDiary() {
                     <Button
                       key={emotion.name}
                       variant={
-                        editor.selectedEmotions.includes(emotion.name)
-                          ? 'default'
-                          : 'outline'
+                        editor.selectedEmotions.includes(emotion.name) ? 'default' : 'outline'
                       }
                       onClick={() => {
                         setEditor((prev) => {
-                          const isSelected = prev.selectedEmotions.includes(
-                            emotion.name
-                          )
-                          let newEmotions
-
+                          const isSelected = prev.selectedEmotions.includes(emotion.name)
+                          let next
                           if (isSelected) {
-                            // 이미 선택된 감정이면 제거
-                            newEmotions = prev.selectedEmotions.filter(
-                              (e) => e !== emotion.name
-                            )
+                            next = prev.selectedEmotions.filter((e) => e !== emotion.name)
                           } else {
-                            // 최대 3개까지만 선택 가능
-                            if (prev.selectedEmotions.length >= 3) {
-                              return prev // 변경하지 않음
-                            }
-                            newEmotions = [
-                              ...prev.selectedEmotions,
-                              emotion.name,
-                            ]
+                            if (prev.selectedEmotions.length >= 3) return prev
+                            next = [...prev.selectedEmotions, emotion.name]
                           }
-
                           return {
                             ...prev,
-                            selectedEmotions: newEmotions,
-                            aiFeedback: prev.editingDiary
-                              ? prev.aiFeedback
-                              : '',
+                            selectedEmotions: next,
+                            aiFeedback: prev.editingDiary ? prev.aiFeedback : '',
                             isSaved: prev.editingDiary ? true : false,
                             editingDiary: prev.editingDiary,
                           }
@@ -356,67 +338,55 @@ export default function EmotionDiary() {
                             : 'border-gray-300 hover:bg-gray-100 dark:border-gray-700 dark:hover:bg-gray-800'
                       }`}
                     >
-                      <span className="mb-1 text-2xl md:text-3xl">
-                        {emotion.emoji}
-                      </span>
-                      <span className="text-xs md:text-sm">
-                        {emotion.label}
-                      </span>
+                      <span className="mb-1 text-2xl md:text-3xl">{emotion.emoji}</span>
+                      <span className="text-xs md:text-sm">{emotion.label}</span>
                     </Button>
                   ))}
                 </div>
               </div>
+
               <div>
-                <Label
-                  htmlFor="diary-entry"
-                  className="mb-3 block text-sm md:text-base"
-                >
+                <Label htmlFor="diary-entry" className="mb-3 block text-sm md:text-base">
                   오늘 하루를 기록해 보세요.
                 </Label>
                 <Textarea
                   id="diary-entry"
                   placeholder="오늘 있었던 일이나 느낀 감정을 자유롭게 적어주세요..."
                   value={editor.diaryEntry}
-                  onChange={(e) => {
-                    setEditor((prev) => ({
-                      ...prev,
+                  onChange={(e) =>
+                    setEditor((p) => ({
+                      ...p,
                       diaryEntry: e.target.value,
-                      aiFeedback: prev.editingDiary ? prev.aiFeedback : '',
-                      isSaved: prev.editingDiary ? true : false,
-                      editingDiary: prev.editingDiary,
+                      aiFeedback: p.editingDiary ? p.aiFeedback : '',
+                      isSaved: p.editingDiary ? true : false,
+                      editingDiary: p.editingDiary,
                     }))
-                  }}
-                  className="min-h-[150px] text-[15px] focus-visible:ring-purple-500 md:min-h-[200px] md:text-base"
+                  }
+                  className="min-h[150px] text-[15px] focus-visible:ring-purple-500 md:min-h-[200px] md:text-base"
                 />
               </div>
+
               {(() => {
-                const shouldShow =
+                const ok =
                   editor.aiFeedback &&
                   editor.aiFeedback.trim() &&
                   editor.selectedEmotions.length > 0 &&
                   editor.diaryEntry.trim()
-                console.log('AI 피드백 표시 조건:', {
-                  hasFeedback: !!editor.aiFeedback,
-                  feedbackTrimmed: !!editor.aiFeedback?.trim(),
-                  hasEmotions: editor.selectedEmotions.length > 0,
-                  hasContent: !!editor.diaryEntry.trim(),
-                  shouldShow,
-                })
-                return shouldShow
+                return ok
               })() && (
                 <div className="rounded-lg border border-purple-200 bg-purple-50 p-4 text-purple-800 dark:bg-purple-950 dark:text-purple-200">
                   <p className="mb-2 font-semibold">AI의 한마디:</p>
                   <p className="leading-relaxed">{editor.aiFeedback}</p>
                 </div>
               )}
-              {editor.aiFeedback &&
-                editor.aiFeedback.trim() &&
-                !editor.isSaved && (
-                  <div className="rounded-lg border border-red-200 bg-red-50 p-4 text-red-800 dark:bg-red-950 dark:text-red-200">
-                    <p className="mb-2 font-semibold">알림:</p>
-                    <p className="leading-relaxed">{editor.aiFeedback}</p>
-                  </div>
-                )}
+
+              {editor.aiFeedback && editor.aiFeedback.trim() && !editor.isSaved && (
+                <div className="rounded-lg border border-red-200 bg-red-50 p-4 text-red-800 dark:bg-red-950 dark:text-red-200">
+                  <p className="mb-2 font-semibold">알림:</p>
+                  <p className="leading-relaxed">{editor.aiFeedback}</p>
+                </div>
+              )}
+
               <div className="flex flex-col gap-2 sm:flex-row sm:justify-between">
                 <Button
                   variant="outline"
@@ -446,7 +416,7 @@ export default function EmotionDiary() {
             </div>
           </div>
 
-          {/* 일기 목록 영역 */}
+          {/* 목록 */}
           <div className="w-full border-t bg-gray-50 p-4 dark:bg-gray-900 md:w-80 md:border-l md:border-t-0">
             <div className="mb-4 flex items-center justify-between">
               <h3 className="text-base font-semibold text-gray-900 dark:text-white md:text-lg">
@@ -456,36 +426,25 @@ export default function EmotionDiary() {
                 </span>
               </h3>
               <button
-                onClick={() =>
-                  setList((prev) => ({ ...prev, isExpanded: !prev.isExpanded }))
-                }
+                onClick={() => setList((p) => ({ ...p, isExpanded: !p.isExpanded }))}
                 className="text-sm text-purple-600 hover:text-purple-700 md:hidden"
               >
                 {list.isExpanded ? '접기 ▲' : '펼치기 ▼'}
               </button>
             </div>
 
-            {/* 모바일: isExpanded가 true일 때만 표시, PC: 항상 표시 */}
-            <div
-              className={`space-y-3 ${list.isExpanded ? 'block' : 'hidden'} md:block`}
-            >
+            <div className={`space-y-3 ${list.isExpanded ? 'block' : 'hidden'} md:block`}>
               {list.savedDiaries.length === 0 ? (
                 <p className="text-sm text-gray-500 dark:text-gray-400">
                   아직 저장된 일기가 없습니다.
                 </p>
               ) : (
-                (list.showAll
-                  ? list.savedDiaries
-                  : list.savedDiaries.slice(0, 3)
-                )
+                (list.showAll ? list.savedDiaries : list.savedDiaries.slice(0, 3))
                   .sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt))
                   .map((diary) => (
                     <div
                       key={diary.id}
-                      onClick={() => {
-                        console.log('일기 클릭됨:', diary)
-                        setList((prev) => ({ ...prev, selectedDiary: diary }))
-                      }}
+                      onClick={() => setList((p) => ({ ...p, selectedDiary: diary }))}
                       className={`cursor-pointer rounded-lg border p-3 transition-all duration-200 hover:shadow-md ${
                         list.selectedDiary?.id === diary.id
                           ? 'border-purple-300 bg-purple-50 dark:border-purple-600 dark:bg-purple-950'
@@ -499,18 +458,12 @@ export default function EmotionDiary() {
                           day: 'numeric',
                           weekday: 'long',
                         })}
-                        {diary.updatedAt &&
-                          diary.updatedAt !== diary.createdAt && (
-                            <span className="ml-1 text-orange-500">
-                              (수정됨)
-                            </span>
-                          )}
+                        {diary.updatedAt && diary.updatedAt !== diary.createdAt && (
+                          <span className="ml-1 text-orange-500">(수정됨)</span>
+                        )}
                       </p>
                       <p className="text-sm font-medium">
-                        {getEmotionsLabel(
-                          diary.emotions ||
-                            (diary.emotion ? [diary.emotion] : [])
-                        )}
+                        {getEmotionsLabel(diary.emotions || (diary.emotion ? [diary.emotion] : []))}
                       </p>
                       <p className="mt-1 text-xs text-gray-400 dark:text-gray-500">
                         클릭하여 상세보기
@@ -520,14 +473,11 @@ export default function EmotionDiary() {
               )}
             </div>
 
-            {/* PC용 더보기 버튼 */}
             {list.savedDiaries.length > 3 && (
               <Button
                 variant="ghost"
                 className="mt-2 hidden w-full md:flex"
-                onClick={() =>
-                  setList((prev) => ({ ...prev, showAll: !prev.showAll }))
-                }
+                onClick={() => setList((p) => ({ ...p, showAll: !p.showAll }))}
               >
                 {list.showAll ? '접기 ▲' : '더보기 ▼'}
               </Button>
@@ -536,43 +486,33 @@ export default function EmotionDiary() {
         </div>
       </div>
 
-      {/* 상세 보기 모달 */}
+      {/* 상세 모달 */}
       {list.selectedDiary && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-50">
           <div className="max-h-[80vh] w-full max-w-2xl overflow-y-auto rounded-lg bg-white shadow-xl dark:bg-gray-800">
             <div className="p-6">
               <div className="mb-4 flex items-center justify-between">
                 <h2 className="text-xl font-semibold text-gray-900 dark:text-white">
-                  {new Date(list.selectedDiary.createdAt).toLocaleDateString(
-                    'ko-KR',
-                    {
-                      year: 'numeric',
-                      month: 'long',
-                      day: 'numeric',
-                      weekday: 'long',
-                    }
-                  )}
+                  {new Date(list.selectedDiary.createdAt).toLocaleDateString('ko-KR', {
+                    year: 'numeric',
+                    month: 'long',
+                    day: 'numeric',
+                    weekday: 'long',
+                  })}{' '}
                   {list.selectedDiary.updatedAt &&
-                    list.selectedDiary.updatedAt !==
-                      list.selectedDiary.createdAt && (
-                      <span className="ml-2 text-sm text-orange-500">
-                        (수정됨)
-                      </span>
+                    list.selectedDiary.updatedAt !== list.selectedDiary.createdAt && (
+                      <span className="ml-2 text-sm text-orange-500">(수정됨)</span>
                     )}{' '}
                   -{' '}
                   {getEmotionsLabel(
                     list.selectedDiary.emotions ||
-                      (list.selectedDiary.emotion
-                        ? [list.selectedDiary.emotion]
-                        : [])
+                      (list.selectedDiary.emotion ? [list.selectedDiary.emotion] : [])
                   )}
                 </h2>
                 <Button
                   variant="ghost"
                   size="sm"
-                  onClick={() =>
-                    setList((prev) => ({ ...prev, selectedDiary: null }))
-                  }
+                  onClick={() => setList((p) => ({ ...p, selectedDiary: null }))}
                   className="text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200"
                 >
                   ✕
@@ -581,18 +521,14 @@ export default function EmotionDiary() {
 
               <div className="space-y-4">
                 <div>
-                  <h4 className="mb-2 font-semibold text-gray-900 dark:text-white">
-                    일기 내용
-                  </h4>
+                  <h4 className="mb-2 font-semibold text-gray-900 dark:text-white">일기 내용</h4>
                   <div className="whitespace-pre-line rounded-lg bg-gray-50 p-4 text-gray-700 dark:bg-gray-800 dark:text-gray-300">
                     {list.selectedDiary.content}
                   </div>
                 </div>
                 {list.selectedDiary.feedback && (
                   <div>
-                    <h4 className="mb-2 font-semibold text-gray-900 dark:text-white">
-                      AI 피드백
-                    </h4>
+                    <h4 className="mb-2 font-semibold text-gray-900 dark:text-white">AI 피드백</h4>
                     <div className="rounded-lg border border-purple-200 bg-purple-50 p-4 text-purple-800 dark:border-purple-700 dark:bg-purple-950 dark:text-purple-200">
                       {list.selectedDiary.feedback}
                     </div>
@@ -605,7 +541,7 @@ export default function EmotionDiary() {
                   variant="outline"
                   onClick={() => {
                     handleEditDiary(list.selectedDiary)
-                    setList((prev) => ({ ...prev, selectedDiary: null }))
+                    setList((p) => ({ ...p, selectedDiary: null }))
                   }}
                 >
                   <EditIcon className="mr-2 h-4 w-4" />
@@ -615,17 +551,13 @@ export default function EmotionDiary() {
                   variant="destructive"
                   onClick={() => {
                     handleDeleteDiary(list.selectedDiary.id)
-                    setList((prev) => ({ ...prev, selectedDiary: null }))
+                    setList((p) => ({ ...p, selectedDiary: null }))
                   }}
                 >
                   <TrashIcon className="mr-2 h-4 w-4" />
                   삭제
                 </Button>
-                <Button
-                  onClick={() =>
-                    setList((prev) => ({ ...prev, selectedDiary: null }))
-                  }
-                >
+                <Button onClick={() => setList((p) => ({ ...p, selectedDiary: null }))}>
                   닫기
                 </Button>
               </div>

@@ -1,126 +1,257 @@
-import { useEffect, useState } from 'react'
-import { useAuth } from '@/contexts/AuthContext'
-import { diaryService, conversationService } from '@/lib/firestore'
+'use client';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { apiDiary, apiChat } from '@/lib/api';
+import { useAuth } from '@/contexts/AuthContext';
 
-// 사용자 인증 상태에 따른 데이터 동기화 훅
-export const useDataSync = () => {
-  const { user } = useAuth()
-  const [isSyncing, setIsSyncing] = useState(false)
-  const [syncStatus, setSyncStatus] = useState('idle') // 'idle', 'syncing', 'success', 'error'
+/**
+ * Firestore 동기화를 없애고, 백엔드 REST(API) 중심으로
+ * 일기/대화 데이터를 불러오고 갱신하는 훅.
+ *
+ * - 로그인 유저: 백엔드에서 일기/대화 조회
+ * - 비로그인: localStorage 폴백(기존 UX 유지)
+ *
+ * 반환:
+ *   { diaries, conversations, loading, error,
+ *     refresh,    // 일기+대화 동시 새로고침
+ *     upsertDiary, deleteDiary,
+ *     createConversation, listConversations, getMessages, sendMessage, deleteConversation
+ *   }
+ */
+export default function useDataSync(options = {}) {
+  const {
+    pollMs = 0,         // >0 설정 시 주기적 폴링
+    enable = true,      // 훅 동작 on/off
+    lsDiaryKey = 'emotion-diaries',
+    lsConvKey = 'local-conversations',
+  } = options;
 
-  // localStorage에서 Firebase로 데이터 마이그레이션
-  const syncLocalDataToFirebase = async () => {
-    if (!user) return
+  const { user } = useAuth();
+  const [diaries, setDiaries] = useState([]);
+  const [conversations, setConversations] = useState([]);
+  const [loading, setLoading] = useState(false);
+  const [error, setErr] = useState(null);
+  const timerRef = useRef(null);
 
-    setIsSyncing(true)
-    setSyncStatus('syncing')
+  const normalizeDiary = useCallback((d) => ({
+    id: d.id ?? d.diaryId ?? `${Date.now()}-${Math.random()}`,
+    content: d.content ?? '',
+    emotions: d.emotions ?? (d.emotion ? [d.emotion] : []),
+    feedback: d.feedback ?? '',
+    createdAt: d.createdAt ?? d.created_at ?? new Date().toISOString(),
+    updatedAt: d.updatedAt ?? d.updated_at ?? d.createdAt ?? new Date().toISOString(),
+  }), []);
 
+  const loadDiaries = useCallback(async () => {
+    if (!enable) return [];
     try {
-      // 일기 데이터 동기화
-      const localDiaries = localStorage.getItem('emotion-diaries')
-      if (localDiaries) {
-        const diaries = JSON.parse(localDiaries)
-        const firebaseDiaries = await diaryService.getUserDiaries(user.uid)
-        
-        // Firebase에 없는 일기들만 추가
-        for (const diary of diaries) {
-          const exists = firebaseDiaries.some(fbDiary => 
-            fbDiary.content === diary.content && 
-            new Date(fbDiary.createdAt?.toDate?.() || fbDiary.createdAt).getTime() === new Date(diary.createdAt).getTime()
-          )
-          
-          if (!exists) {
-            await diaryService.saveDiary(user.uid, {
-              emotions: diary.emotions || (diary.emotion ? [diary.emotion] : []),
-              content: diary.content,
-              feedback: diary.feedback || '',
-            })
-          }
-        }
+      if (user) {
+        const resp = await apiDiary.list();
+        const list = Array.isArray(resp) ? resp.map(normalizeDiary) : [];
+        setDiaries(list);
+        return list;
       }
+      // guest: localStorage
+      const saved = localStorage.getItem(lsDiaryKey);
+      const list = saved ? JSON.parse(saved) : [];
+      setDiaries(list);
+      return list;
+    } catch (e) {
+      setErr(e);
+      // 폴백: localStorage
+      const saved = localStorage.getItem(lsDiaryKey);
+      const list = saved ? JSON.parse(saved) : [];
+      setDiaries(list);
+      return list;
+    }
+  }, [enable, lsDiaryKey, normalizeDiary, user]);
 
-      // 대화 데이터 동기화 (선택적)
-      const localConversations = localStorage.getItem('ai-conversations')
-      if (localConversations) {
-        const conversations = JSON.parse(localConversations)
-        const firebaseConversations = await conversationService.getUserConversations(user.uid)
-        
-        // Firebase에 없는 대화들만 추가
-        for (const conversation of conversations) {
-          const exists = firebaseConversations.some(fbConv => 
-            fbConv.messages?.length === conversation.messages?.length &&
-            fbConv.createdAt?.toDate?.()?.getTime() === new Date(conversation.createdAt).getTime()
-          )
-          
-          if (!exists && conversation.messages && conversation.messages.length > 1) {
-            await conversationService.saveConversation(user.uid, {
-              messages: conversation.messages,
-              topic: conversation.topic || 'general',
-              title: conversation.title || `AI와의 감정 대화 - ${new Date(conversation.createdAt).toLocaleDateString('ko-KR')}`,
-            })
-          }
-        }
+  const loadConversations = useCallback(async () => {
+    if (!enable) return [];
+    try {
+      if (user) {
+        const list = await apiChat.listConversations();
+        setConversations(Array.isArray(list) ? list : []);
+        return Array.isArray(list) ? list : [];
       }
+      // guest: localStorage
+      const saved = localStorage.getItem(lsConvKey);
+      const list = saved ? JSON.parse(saved) : [];
+      setConversations(list);
+      return list;
+    } catch (e) {
+      setErr(e);
+      const saved = localStorage.getItem(lsConvKey);
+      const list = saved ? JSON.parse(saved) : [];
+      setConversations(list);
+      return list;
+    }
+  }, [enable, lsConvKey, user]);
 
-      setSyncStatus('success')
-      
-      // 동기화 완료 후 localStorage 데이터는 유지 (백업용)
-      // 필요시 localStorage.clear()로 완전 삭제 가능
-      
-    } catch (error) {
-      console.error('데이터 동기화 실패:', error)
-      setSyncStatus('error')
+  const refresh = useCallback(async () => {
+    setLoading(true);
+    try {
+      await Promise.all([loadDiaries(), loadConversations()]);
     } finally {
-      setIsSyncing(false)
+      setLoading(false);
     }
-  }
+  }, [loadConversations, loadDiaries]);
 
-  // Firebase에서 localStorage로 데이터 백업
-  const backupFirebaseDataToLocal = async () => {
-    if (!user) return
-
-    try {
-      // 일기 데이터 백업
-      const diaries = await diaryService.getUserDiaries(user.uid)
-      const formattedDiaries = diaries.map(diary => ({
-        id: diary.id,
-        date: diary.createdAt?.toDate?.()?.toISOString() || diary.createdAt,
-        emotions: diary.emotions,
-        content: diary.content,
-        feedback: diary.feedback,
-        createdAt: diary.createdAt?.toDate?.()?.toISOString() || diary.createdAt,
-        updatedAt: diary.updatedAt?.toDate?.()?.toISOString() || diary.updatedAt,
-      }))
-      localStorage.setItem('emotion-diaries-backup', JSON.stringify(formattedDiaries))
-
-      // 대화 데이터 백업
-      const conversations = await conversationService.getUserConversations(user.uid)
-      const formattedConversations = conversations.map(conv => ({
-        id: conv.id,
-        messages: conv.messages,
-        topic: conv.topic,
-        title: conv.title,
-        createdAt: conv.createdAt?.toDate?.()?.toISOString() || conv.createdAt,
-        updatedAt: conv.updatedAt?.toDate?.()?.toISOString() || conv.updatedAt,
-      }))
-      localStorage.setItem('ai-conversations-backup', JSON.stringify(formattedConversations))
-
-    } catch (error) {
-      console.error('데이터 백업 실패:', error)
+  // CRUD — Diary
+  const upsertDiary = useCallback(async (payload, diaryId = null) => {
+    if (user) {
+      if (diaryId) {
+        await apiDiary.update(diaryId, payload);
+      } else {
+        await apiDiary.create(payload);
+      }
+      await loadDiaries();
+    } else {
+      // guest: localStorage
+      const saved = localStorage.getItem(lsDiaryKey);
+      let list = saved ? JSON.parse(saved) : [];
+      if (diaryId) {
+        list = list.map(d => d.id === diaryId ? {
+          ...d,
+          ...payload,
+          updatedAt: new Date().toISOString()
+        } : d);
+      } else {
+        list = [{
+          id: `${Date.now()}`,
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString(),
+          ...payload,
+        }, ...list];
+      }
+      localStorage.setItem(lsDiaryKey, JSON.stringify(list));
+      setDiaries(list);
     }
-  }
+  }, [lsDiaryKey, loadDiaries, user]);
 
-  // 사용자 로그인 시 자동 동기화
+  const deleteDiary = useCallback(async (diaryId) => {
+    if (!diaryId) return;
+    if (user) {
+      await apiDiary.remove(diaryId);
+      await loadDiaries();
+    } else {
+      const saved = localStorage.getItem(lsDiaryKey);
+      const list = saved ? JSON.parse(saved) : [];
+      const next = list.filter(d => d.id !== diaryId);
+      localStorage.setItem(lsDiaryKey, JSON.stringify(next));
+      setDiaries(next);
+    }
+  }, [lsDiaryKey, loadDiaries, user]);
+
+  // Chat helpers
+  const createConversation = useCallback(async ({ title, topic }) => {
+    if (user) {
+      const c = await apiChat.createConversation({ title, topic });
+      await loadConversations();
+      return c;
+    } else {
+      const saved = localStorage.getItem(lsConvKey);
+      const list = saved ? JSON.parse(saved) : [];
+      const conv = {
+        id: `${Date.now()}`,
+        title: title || '대화',
+        topic: topic || 'general',
+        createdAt: new Date().toISOString(),
+      };
+      const next = [conv, ...list];
+      localStorage.setItem(lsConvKey, JSON.stringify(next));
+      setConversations(next);
+      return conv;
+    }
+  }, [lsConvKey, loadConversations, user]);
+
+  const listConversations = useCallback(async () => {
+    if (user) {
+      return apiChat.listConversations();
+    }
+    const saved = localStorage.getItem(lsConvKey);
+    return saved ? JSON.parse(saved) : [];
+  }, [lsConvKey, user]);
+
+  const getMessages = useCallback(async (conversationId) => {
+    if (!conversationId) return [];
+    if (user) {
+      const msgs = await apiChat.getMessages(conversationId);
+      return Array.isArray(msgs) ? msgs : [];
+    }
+    const key = `${lsConvKey}:${conversationId}:messages`;
+    const saved = localStorage.getItem(key);
+    return saved ? JSON.parse(saved) : [];
+  }, [lsConvKey, user]);
+
+  const sendMessage = useCallback(async (conversationId, body) => {
+    if (!conversationId) throw new Error('conversationId가 필요합니다.');
+    if (user) {
+      return apiChat.sendMessage(conversationId, body);
+    }
+    const key = `${lsConvKey}:${conversationId}:messages`;
+    const saved = localStorage.getItem(key);
+    const msgs = saved ? JSON.parse(saved) : [];
+    const userMsg = {
+      id: `${Date.now()}`,
+      role: 'user',
+      content: body?.content ?? '',
+      createdAt: new Date().toISOString()
+    };
+    const aiMsg = {
+      id: `${Date.now()+1}`,
+      role: 'assistant',
+      content: '게스트 모드에서는 로컬 저장만 됩니다.',
+      createdAt: new Date().toISOString()
+    };
+    const next = [...msgs, userMsg, aiMsg];
+    localStorage.setItem(key, JSON.stringify(next));
+    return { messages: next };
+  }, [lsConvKey, user]);
+
+  const deleteConversation = useCallback(async (conversationId) => {
+    if (!conversationId) return;
+    if (user) {
+      await apiChat.deleteConversation(conversationId);
+      await loadConversations();
+    } else {
+      const saved = localStorage.getItem(lsConvKey);
+      const list = saved ? JSON.parse(saved) : [];
+      const next = list.filter(c => c.id !== conversationId);
+      localStorage.setItem(lsConvKey, JSON.stringify(next));
+      // 메시지 로컬 키도 정리
+      localStorage.removeItem(`${lsConvKey}:${conversationId}:messages`);
+      setConversations(next);
+    }
+  }, [lsConvKey, loadConversations, user]);
+
+  // 초기/폴링 로드
   useEffect(() => {
-    if (user && syncStatus === 'idle') {
-      syncLocalDataToFirebase()
+    if (!enable) return;
+    refresh();
+    if (pollMs > 0) {
+      timerRef.current = setInterval(refresh, pollMs);
+      return () => clearInterval(timerRef.current);
     }
-  }, [user])
+  }, [enable, pollMs, refresh]);
 
-  return {
-    isSyncing,
-    syncStatus,
-    syncLocalDataToFirebase,
-    backupFirebaseDataToLocal,
-  }
+  const value = useMemo(() => ({
+    diaries,
+    conversations,
+    loading,
+    error,
+    refresh,
+    upsertDiary,
+    deleteDiary,
+    createConversation,
+    listConversations,
+    getMessages,
+    sendMessage,
+    deleteConversation,
+  }), [
+    diaries, conversations, loading, error,
+    refresh, upsertDiary, deleteDiary,
+    createConversation, listConversations, getMessages, sendMessage, deleteConversation
+  ]);
+
+  return value;
 }
