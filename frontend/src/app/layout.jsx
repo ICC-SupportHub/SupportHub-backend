@@ -1,8 +1,7 @@
 import './globals.css'
 import { Inter } from 'next/font/google'
-import { AppShell } from '@/components/app-shell'
-import { AuthProvider } from '@/contexts/AuthContext'
-import { DataSyncProvider } from '@/components/DataSyncProvider'
+import Providers from './providers'
+import { AppShell } from '@/components/app-shell' // AppShell이 클라이언트 컴포넌트여도 OK
 
 const inter = Inter({ subsets: ['latin'] })
 
@@ -32,11 +31,9 @@ export default function RootLayout({ children }) {
   return (
     <html lang="ko">
       <body className={inter.className}>
-        <AuthProvider>
-          <DataSyncProvider>
-            <AppShell>{children}</AppShell>
-          </DataSyncProvider>
-        </AuthProvider>
+        <Providers>
+          <AppShell>{children}</AppShell>
+        </Providers>
       </body>
     </html>
   )

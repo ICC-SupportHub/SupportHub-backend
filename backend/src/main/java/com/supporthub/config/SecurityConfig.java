@@ -40,9 +40,9 @@ public class SecurityConfig {
     public CorsConfigurationSource corsConfigurationSource() {
         CorsConfiguration c = new CorsConfiguration();
         c.setAllowedOrigins(List.of("http://localhost:3000")); // 배포시 도메인으로 교체
-        c.setAllowedMethods(List.of("GET", "POST", "PUT", "DELETE", "OPTIONS"));
+        c.setAllowedMethods(List.of("GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"));
         c.setAllowedHeaders(List.of("*"));
-        c.setExposeHeaders(List.of(HttpHeaders.SET_COOKIE));
+        c.setExposedHeaders(List.of(HttpHeaders.SET_COOKIE));
         c.setAllowCredentials(true);
         // (선택) 캐시 시간
         c.setMaxAge(Duration.ofHours(1));
