@@ -21,6 +21,22 @@
 ```
 
 ---
+## 익명 커뮤니티 작성자 확인 sql
+```
+SELECT
+    p.id                AS post_id,
+    p.content           AS post_content,
+    p.created_at        AS post_created_at,
+    u.id                AS user_id,
+    u.email             AS user_email,
+    u.nickname          AS user_nickname
+FROM community_post p
+JOIN users u
+  ON p.user_id = u.id
+WHERE p.id = 2;
+```
+
+---
 
 ## 🚀 실행 방법
 

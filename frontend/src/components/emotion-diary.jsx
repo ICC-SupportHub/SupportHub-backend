@@ -4,7 +4,7 @@ import { useSearchParams } from 'next/navigation'
 import { Textarea } from '@/components/ui/textarea'
 import { Button } from '@/components/ui/button'
 import { Label } from '@/components/ui/label'
-import { CalendarIcon, LoaderIcon, EditIcon, TrashIcon } from 'lucide-react'
+import { CalendarIcon, EditIcon, TrashIcon, Loader2Icon } from 'lucide-react'
 import { useAuth } from '@/contexts/AuthContext'
 import { apiDiary } from '@/lib/api'
 
@@ -35,8 +35,7 @@ export default function EmotionDiary() {
     const emotion = searchParams.get('emotion')
     const content = searchParams.get('content')
     if (emotion) setEditor((p) => ({ ...p, selectedEmotions: [emotion] }))
-    if (content)
-      setEditor((p) => ({ ...p, diaryEntry: decodeURIComponent(content) }))
+    if (content) setEditor((p) => ({ ...p, diaryEntry: decodeURIComponent(content) }))
   }, [searchParams])
 
   useEffect(() => {
@@ -50,25 +49,19 @@ export default function EmotionDiary() {
                 content: d.content ?? '',
                 emotions: d.emotions ?? (d.emotion ? [d.emotion] : []),
                 feedback: d.feedback ?? '',
-                createdAt:
-                  d.createdAt ?? d.created_at ?? new Date().toISOString(),
+                createdAt: d.createdAt ?? d.created_at ?? new Date().toISOString(),
                 updatedAt:
-                  d.updatedAt ??
-                  d.updated_at ??
-                  d.createdAt ??
-                  new Date().toISOString(),
+                  d.updatedAt ?? d.updated_at ?? d.createdAt ?? new Date().toISOString(),
               }))
             : []
           setList((p) => ({ ...p, savedDiaries: normalized }))
         } else {
           const saved = localStorage.getItem('emotion-diaries')
-          if (saved)
-            setList((p) => ({ ...p, savedDiaries: JSON.parse(saved) }))
+          if (saved) setList((p) => ({ ...p, savedDiaries: JSON.parse(saved) }))
         }
       } catch {
         const saved = localStorage.getItem('emotion-diaries')
-        if (saved)
-          setList((p) => ({ ...p, savedDiaries: JSON.parse(saved) }))
+        if (saved) setList((p) => ({ ...p, savedDiaries: JSON.parse(saved) }))
       }
     }
     loadDiaries()
@@ -155,9 +148,7 @@ export default function EmotionDiary() {
             content: created?.content ?? editor.diaryEntry,
             feedback: created?.feedback ?? feedback,
             createdAt:
-              created?.createdAt ??
-              created?.created_at ??
-              new Date().toISOString(),
+              created?.createdAt ?? created?.created_at ?? new Date().toISOString(),
             updatedAt:
               created?.updatedAt ??
               created?.updated_at ??
@@ -194,8 +185,7 @@ export default function EmotionDiary() {
     } catch {
       setEditor((p) => ({
         ...p,
-        aiFeedback:
-          '피드백을 가져오는 중 오류가 발생했습니다. 다시 시도해 주세요.',
+        aiFeedback: '피드백을 가져오는 중 오류가 발생했습니다. 다시 시도해 주세요.',
       }))
     } finally {
       setEditor((p) => ({ ...p, isLoading: false }))
@@ -287,9 +277,7 @@ export default function EmotionDiary() {
             <h1 className="text-lg font-semibold text-gray-900 dark:text-white md:text-xl">
               감정 일기
             </h1>
-            <p className="text-xs text-gray-500 dark:text-gray-400 md:text-sm">
-              {today}
-            </p>
+            <p className="text-xs text-gray-500 dark:text-gray-400 md:text-sm">{today}</p>
           </div>
         </div>
       </div>
@@ -362,7 +350,7 @@ export default function EmotionDiary() {
                       editingDiary: p.editingDiary,
                     }))
                   }
-                  className="min-h[150px] text-[15px] focus-visible:ring-purple-500 md:min-h-[200px] md:text-base"
+                  className="min-h-[150px] text-[15px] focus-visible:ring-purple-500 md:min-h-[200px] md:text-base"
                 />
               </div>
 
@@ -403,7 +391,7 @@ export default function EmotionDiary() {
                 >
                   {editor.isLoading ? (
                     <>
-                      <LoaderIcon className="mr-2 h-4 w-4 animate-spin" />
+                      <Loader2Icon className="mr-2 h-4 w-4 animate-spin" />
                       AI 피드백 생성 중...
                     </>
                   ) : editor.editingDiary ? (
@@ -463,7 +451,9 @@ export default function EmotionDiary() {
                         )}
                       </p>
                       <p className="text-sm font-medium">
-                        {getEmotionsLabel(diary.emotions || (diary.emotion ? [diary.emotion] : []))}
+                        {getEmotionsLabel(
+                          diary.emotions || (diary.emotion ? [diary.emotion] : [])
+                        )}
                       </p>
                       <p className="mt-1 text-xs text-gray-400 dark:text-gray-500">
                         클릭하여 상세보기

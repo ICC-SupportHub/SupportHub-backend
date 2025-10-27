@@ -20,8 +20,8 @@ import org.springframework.web.cors.UrlBasedCorsConfigurationSource;
 
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
-import java.io.IOException;
 import java.time.Duration;
+import java.io.IOException;
 import java.util.List;
 
 @Configuration
@@ -31,74 +31,84 @@ public class SecurityConfig {
     private final JwtAuthenticationFilter jwtAuthenticationFilter;
 
     /**
-     * ✅ 프론트(Next)에서 credentials 포함 요청을 허용하려면
-     * - allowCredentials: true
-     * - Origin: http://localhost:3000 허용
-     * - 메서드/헤더 허용
+     * CORS 설정
+     * - 프론트 (Next.js dev) 주소 허용
+     * - credentials 허용
      */
     @Bean
     public CorsConfigurationSource corsConfigurationSource() {
         CorsConfiguration c = new CorsConfiguration();
-        c.setAllowedOrigins(List.of("http://localhost:3000")); // 배포시 도메인으로 교체
+        c.setAllowedOrigins(List.of("http://localhost:3000")); // 배포 시 도메인으로 교체
         c.setAllowedMethods(List.of("GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"));
         c.setAllowedHeaders(List.of("*"));
         c.setExposedHeaders(List.of(HttpHeaders.SET_COOKIE));
         c.setAllowCredentials(true);
-        // (선택) 캐시 시간
-        c.setMaxAge(Duration.ofHours(1));
+        c.setMaxAge(Duration.ofHours(1)); // preflight 캐시
+
         UrlBasedCorsConfigurationSource source = new UrlBasedCorsConfigurationSource();
         source.registerCorsConfiguration("/**", c);
         return source;
     }
 
     /**
-     * ✅ 401 응답을 JSON으로 통일
+     * 인증 안 된 요청 들어오면 401 JSON으로 응답
      */
     @Bean
     public AuthenticationEntryPoint restAuthenticationEntryPoint() {
-        return (HttpServletRequest request, HttpServletResponse response, org.springframework.security.core.AuthenticationException authException) -> {
+        return (HttpServletRequest request,
+                HttpServletResponse response,
+                org.springframework.security.core.AuthenticationException authException
+        ) -> {
             response.setStatus(HttpStatus.UNAUTHORIZED.value());
             response.setContentType("application/json;charset=UTF-8");
             response.getWriter().write("{\"error\":\"unauthorized\"}");
         };
     }
 
+    /**
+     * 메인 시큐리티 필터 체인
+     */
     @Bean
     public SecurityFilterChain filterChain(HttpSecurity http) throws Exception {
+
         http
-                // CORS 활성화
                 .cors(Customizer.withDefaults())
                 .csrf(csrf -> csrf.disable())
                 .sessionManagement(s -> s.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
                 .authorizeHttpRequests(auth -> auth
-                        // 비인증 허용 엔드포인트
+
+                        // ✅ 로그인 없이 접근 가능한 애들
                         .requestMatchers(
-                                "/api/auth/**",          // 로그인/회원가입/me 일부는 인증없이 접근(로그인/회원가입만)
+                                "/api/auth/**",      // 회원가입, 로그인 등
                                 "/swagger-ui/**",
                                 "/v3/api-docs/**",
                                 "/actuator/health"
                         ).permitAll()
 
-                        // 대화/일기 API는 로그인 필요 (프론트가 백엔드 권위로 사용)
+                        // ✅ JWT 필수 (로그인된 사용자만)
                         .requestMatchers(
                                 "/api/conversations/**",
                                 "/api/diaries/**",
-                                "/api/users/**"          // 사용자 전용 리소스
+                                "/api/users/**",
+                                "/api/community/**"  // 🔥 커뮤니티 보호 추가
                         ).authenticated()
 
-                        // 기타는 필요시 열어두기
+                        // 그 외는 일단 열어둠
                         .anyRequest().permitAll()
                 )
                 .httpBasic(h -> h.disable())
                 .formLogin(f -> f.disable())
                 .exceptionHandling(e -> e.authenticationEntryPoint(restAuthenticationEntryPoint()));
 
-        // ✅ JWT 필터: UsernamePasswordAuthenticationFilter 앞에 배치
+        // ✅ JWT 필터 추가 (스프링 기본 UsernamePasswordAuthenticationFilter 전에 실행)
         http.addFilterBefore(jwtAuthenticationFilter, UsernamePasswordAuthenticationFilter.class);
 
         return http.build();
     }
 
+    /**
+     * 비밀번호 인코더
+     */
     @Bean
     public PasswordEncoder passwordEncoder() {
         return new BCryptPasswordEncoder();

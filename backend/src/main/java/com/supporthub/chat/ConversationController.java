@@ -15,6 +15,7 @@ import org.springframework.web.bind.annotation.*;
 
 import java.util.Collections;
 import java.util.List;
+import java.util.Map;
 
 @RestController
 @RequestMapping("/api/conversations")
@@ -38,14 +39,14 @@ public class ConversationController {
                 .orElseThrow(() -> new IllegalStateException("사용자 정보를 찾을 수 없습니다."));
     }
 
-    /** 목록 */
+    /** ✅ 대화 목록 조회 */
     @GetMapping
     public List<Conversation> list() {
         Long userId = currentUserId();
         return convRepo.findByUserIdOrderByUpdatedAtDesc(userId);
     }
 
-    /** 메시지 히스토리 (최근 50개, 시간 오름차순) */
+    /** ✅ 메시지 히스토리 (최근 50개, 시간 오름차순) */
     @GetMapping("/{id}/messages")
     public ResponseEntity<List<Message>> history(@PathVariable Long id) {
         var msgs = msgRepo.findTop50ByConversationIdOrderByCreatedAtDesc(id);
@@ -53,8 +54,8 @@ public class ConversationController {
         return ResponseEntity.ok(msgs);
     }
 
-    /** 생성 */
-    public record CreateConversationRequest(String title) {}
+    /** ✅ 새 대화 생성 */
+    public record CreateConversationRequest(String title, String topic) {}
 
     @PostMapping
     public ResponseEntity<Conversation> create(@RequestBody(required = false) CreateConversationRequest req) {
@@ -62,23 +63,31 @@ public class ConversationController {
         Conversation c = convRepo.save(
                 Conversation.builder()
                         .userId(userId)
-                        .title(req == null ? null : req.title())
+                        .title(req == null ? "새 상담" : req.title())
                         .build()
         );
         return ResponseEntity.ok(c);
     }
 
-    /** 질문(ask) */
-    public record AskBody(String message) {}
-
-    @PostMapping("/{id}/ask")
-    public ResponseEntity<ChatResponse> ask(@PathVariable Long id, @RequestBody AskBody body) {
+    /**
+     * ✅ 메시지 전송 (topic 포함)
+     * 프론트엔드 → POST /api/conversations/{id}/messages
+     * body: { "userMessage": "...", "topic": "stress" }
+     */
+    @PostMapping("/{id}/messages")
+    public ResponseEntity<ChatResponse> sendMessage(
+            @PathVariable Long id,
+            @RequestBody Map<String, Object> body
+    ) {
         Long userId = currentUserId();
-        ChatResponse res = chatService.replySync(userId, new ChatRequest(id, body.message()));
+        String userMessage = (String) body.get("userMessage");
+        String topic = (String) body.get("topic");
+
+        ChatResponse res = chatService.replySync(userId, new ChatRequest(id, userMessage, topic));
         return ResponseEntity.ok(res);
     }
 
-    /** 제목 수정 */
+    /** ✅ 제목 수정 */
     public record UpdateTitleRequest(String title) {}
 
     @PatchMapping("/{id}")
@@ -91,7 +100,7 @@ public class ConversationController {
         return ResponseEntity.ok(convRepo.save(c));
     }
 
-    /** 삭제 */
+    /** ✅ 대화 삭제 */
     @DeleteMapping("/{id}")
     public ResponseEntity<Void> delete(@PathVariable Long id) {
         Long userId = currentUserId();
@@ -101,15 +110,4 @@ public class ConversationController {
         convRepo.delete(c);
         return ResponseEntity.noContent().build();
     }
-
-    @PostMapping("/{id}/messages")
-    public ResponseEntity<ChatResponse> sendMessage(
-            @PathVariable Long id,
-            @RequestBody ConversationController.AskBody body
-    ) {
-        Long userId = currentUserId();
-        ChatResponse res = chatService.replySync(userId, new ChatRequest(id, body.message()));
-        return ResponseEntity.ok(res);
-    }
-
 }

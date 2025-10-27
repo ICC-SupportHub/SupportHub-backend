@@ -23,8 +23,6 @@ import {
   BookOpenIcon,
 } from 'lucide-react'
 import { useAuth } from '@/contexts/AuthContext'
-
-// ✅ Firestore 서비스 제거 → 백엔드 API만 사용
 import { apiChat } from '@/lib/api'
 
 function ChatPageContent() {
@@ -39,14 +37,16 @@ function ChatPageContent() {
   const [isSharing, setIsSharing] = useState(false)
   const [copied, setCopied] = useState(false)
   const [currentConversationId, setCurrentConversationId] = useState(null)
+  const [input, setInput] = useState('')
+  const [isLoading, setIsLoading] = useState(false)
 
-  // 주제별 초기 메시지
+  // 🧠 주제별 첫 메시지
   const getInitialMessage = (topic) => {
-    const initialMessages = {
+    const msgs = {
       loneliness:
         '안녕하세요! 외로움을 느끼고 계시는군요. 혼자라는 느낌이 들 때가 있죠. 제가 함께 있어드릴게요. 어떤 부분이 가장 외로우신가요? 😊',
       stress:
-        '안녕하세요! 스트레스를 받고 계시는군요. 일상의 압박감이 힘드실 때가 있죠. 어떤 일이 가장 스트레스를 되시나요? 함께 풀어보아요. 😌',
+        '안녕하세요! 스트레스를 받고 계시는군요. 일상의 압박감이 힘드실 때가 있죠. 어떤 일이 가장 스트레스가 되시나요? 함께 풀어보아요. 😌',
       'self-criticism':
         '안녕하세요! 자신을 너무 혹독하게 대하고 계시는군요. 완벽하지 않아도 괜찮아요. 어떤 부분에서 자신을 비난하고 계신가요? 🤗',
       depression:
@@ -56,10 +56,10 @@ function ChatPageContent() {
       general:
         '안녕하세요! 저는 당신의 감정을 이해하고 공감하는 AI입니다. 오늘 기분은 어떠신가요? 무엇이든 편하게 말씀해 주세요. 😊',
     }
-    return initialMessages[topic] || initialMessages.general
+    return msgs[topic] || msgs.general
   }
 
-  // 대화 로그(초기 안내 1개)
+  // 초기 메시지 상태
   const [messages, setMessages] = useState([
     {
       id: 'welcome',
@@ -68,19 +68,15 @@ function ChatPageContent() {
       createdAt: new Date(),
     },
   ])
-  const [input, setInput] = useState('')
-  const [isLoading, setIsLoading] = useState(false)
 
-  const handleUserInput = (e) => {
-    setInput(e.target.value)
-  }
+  // 입력 핸들러
+  const handleUserInput = (e) => setInput(e.target.value)
 
-  // ✅ 메시지 전송 처리 (백엔드 권위)
+  // ✅ 메시지 전송
   const handleSubmit = async (e) => {
     e.preventDefault()
     if (!input.trim() || isLoading) return
 
-    // 미로그인 시 백엔드가 401을 줄 수 있으므로 안내
     if (!user) {
       toast({
         title: '로그인이 필요합니다',
@@ -97,7 +93,7 @@ function ChatPageContent() {
       createdAt: now,
     }
 
-    // UI에 먼저 사용자 메시지 반영
+    // UI 먼저 업데이트
     const draft = [...messages, userMessage]
     setMessages(draft)
     const currentInput = input
@@ -105,7 +101,7 @@ function ChatPageContent() {
     setIsLoading(true)
 
     try {
-      // 1) 대화가 없으면 먼저 생성
+      // 1️⃣ 대화방이 없으면 생성
       let cid = currentConversationId
       if (!cid) {
         const title = `AI와의 감정 대화 - ${new Date().toLocaleDateString('ko-KR')}`
@@ -113,35 +109,31 @@ function ChatPageContent() {
           title,
           topic: topic || 'general',
         })
-        // 응답이 {id} 형태라고 가정 (안전 처리)
         cid = created?.id || created?.conversationId || created?.data?.id
         if (!cid) throw new Error('대화 생성 실패')
         setCurrentConversationId(cid)
       }
 
-      // 2) 사용자 메시지를 서버로 전송 → 서버가 응답 생성 (권장)
-      //    서버 응답 형태를 폭넓게 처리:
-      //    - { message: {id, role, content, createdAt} }
-      //    - { messages: [...] } (대화 전체/추가분)
-      //    - { content: '...' } 등 단건
-      const sent = await apiChat.sendMessage(cid, { content: currentInput })
+      // 2️⃣ 서버로 메시지 + 주제 함께 전송
+      const sent = await apiChat.sendMessage(cid, {
+        userMessage: currentInput,
+        topic: topic || 'general',
+      })
 
+      // 3️⃣ 서버 응답 해석
       let assistantMessage = null
-      if (sent?.message) {
-        assistantMessage = sent.message
-      } else if (Array.isArray(sent?.messages)) {
-        // 가장 마지막 메시지를 어시스턴트 응답으로 사용
+      if (sent?.message) assistantMessage = sent.message
+      else if (Array.isArray(sent?.messages))
         assistantMessage = sent.messages[sent.messages.length - 1]
-      } else if (typeof sent?.content === 'string') {
+      else if (typeof sent?.content === 'string')
         assistantMessage = {
           id: `${Date.now() + 1}`,
           role: 'assistant',
           content: sent.content,
           createdAt: new Date(),
         }
-      }
 
-      // 서버가 응답을 주지 않는 경우(임시): 안내 메시지로 대체
+      // 4️⃣ 응답 없으면 fallback
       if (!assistantMessage) {
         assistantMessage = {
           id: `${Date.now() + 1}`,
@@ -164,7 +156,6 @@ function ChatPageContent() {
         description: msg,
         variant: 'destructive',
       })
-      // 실패 시, 방금 추가한 사용자 메시지를 되돌리고 입력 복원
       setMessages((prev) => prev.slice(0, -1))
       setInput(currentInput)
     } finally {
@@ -172,6 +163,7 @@ function ChatPageContent() {
     }
   }
 
+  // 공유 기능
   const handleShareConversation = async () => {
     if (messages.length <= 1) {
       toast({
@@ -184,7 +176,6 @@ function ChatPageContent() {
 
     setIsSharing(true)
     try {
-      // NOTE: 여기 /api/share-conversation 은 Next.js API Route(임시 공유)라 그대로 유지
       const response = await fetch('/api/share-conversation', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -202,9 +193,7 @@ function ChatPageContent() {
           title: '대화 공유 링크가 생성되었습니다!',
           description: '링크를 복사해서 다른 사람들과 공유해보세요.',
         })
-      } else {
-        throw new Error(data.error)
-      }
+      } else throw new Error(data.error)
     } catch (error) {
       toast({
         title: '공유 링크 생성 실패',
@@ -216,6 +205,7 @@ function ChatPageContent() {
     }
   }
 
+  // 복사 기능
   const copyToClipboard = async () => {
     try {
       await navigator.clipboard.writeText(shareUrl)
@@ -225,7 +215,7 @@ function ChatPageContent() {
         description: '이제 다른 사람들과 공유할 수 있습니다.',
       })
       setTimeout(() => setCopied(false), 2000)
-    } catch (error) {
+    } catch {
       toast({
         title: '복사 실패',
         description: '링크를 수동으로 복사해주세요.',
@@ -235,9 +225,8 @@ function ChatPageContent() {
   }
 
   useEffect(() => {
-    if (scrollAreaRef.current) {
+    if (scrollAreaRef.current)
       scrollAreaRef.current.scrollTop = scrollAreaRef.current.scrollHeight
-    }
   }, [messages])
 
   useEffect(() => {
@@ -265,7 +254,7 @@ function ChatPageContent() {
             </div>
           </div>
 
-          {/* Share Button */}
+          {/* Share */}
           <Dialog>
             <DialogTrigger asChild>
               <Button
@@ -322,23 +311,23 @@ function ChatPageContent() {
         </div>
       </div>
 
-      {/* Messages */}
+      {/* 메시지 목록 */}
       <ScrollArea className="flex-1 px-4 md:px-6" ref={scrollAreaRef}>
         <div className="mx-auto max-w-3xl space-y-4 py-4 md:space-y-6 md:py-6">
-          {messages.map((message) => (
+          {messages.map((m) => (
             <div
-              key={message.id}
-              className={`flex gap-2 md:gap-4 ${message.role === 'user' ? 'flex-row-reverse' : ''}`}
+              key={m.id}
+              className={`flex gap-2 md:gap-4 ${m.role === 'user' ? 'flex-row-reverse' : ''}`}
             >
               <Avatar className="h-8 w-8 flex-shrink-0 md:h-8 md:w-8">
                 <AvatarFallback
                   className={
-                    message.role === 'user'
+                    m.role === 'user'
                       ? 'bg-blue-100 text-blue-600'
                       : 'bg-purple-100 text-purple-600'
                   }
                 >
-                  {message.role === 'user' ? (
+                  {m.role === 'user' ? (
                     <UserIcon className="h-4 w-4" />
                   ) : (
                     <BotIcon className="h-4 w-4" />
@@ -346,24 +335,24 @@ function ChatPageContent() {
                 </AvatarFallback>
               </Avatar>
               <div
-                className={`max-w-[80%] flex-1 ${message.role === 'user' ? 'text-right' : ''}`}
+                className={`max-w-[80%] flex-1 ${m.role === 'user' ? 'text-right' : ''}`}
               >
                 <div
                   className={`inline-block rounded-xl p-3 md:rounded-2xl md:p-4 ${
-                    message.role === 'user'
+                    m.role === 'user'
                       ? 'bg-blue-500 text-white'
                       : 'bg-gray-100 text-gray-900 dark:bg-gray-700 dark:text-white'
                   }`}
                 >
                   <p className="whitespace-pre-wrap text-[15px] leading-relaxed md:text-sm">
-                    {message.content}
+                    {m.content}
                   </p>
                 </div>
                 <p className="mt-1 text-xs text-gray-500">
-                  {new Date(message.createdAt || Date.now()).toLocaleTimeString(
-                    'ko-KR',
-                    { hour: '2-digit', minute: '2-digit' }
-                  )}
+                  {new Date(m.createdAt || Date.now()).toLocaleTimeString('ko-KR', {
+                    hour: '2-digit',
+                    minute: '2-digit',
+                  })}
                 </p>
               </div>
             </div>
@@ -378,8 +367,14 @@ function ChatPageContent() {
               <div className="rounded-xl bg-gray-100 p-3 dark:bg-gray-700 md:rounded-2xl md:p-4">
                 <div className="flex space-x-1">
                   <div className="h-2 w-2 animate-bounce rounded-full bg-gray-400"></div>
-                  <div className="h-2 w-2 animate-bounce rounded-full bg-gray-400" style={{ animationDelay: '0.1s' }}></div>
-                  <div className="h-2 w-2 animate-bounce rounded-full bg-gray-400" style={{ animationDelay: '0.2s' }}></div>
+                  <div
+                    className="h-2 w-2 animate-bounce rounded-full bg-gray-400"
+                    style={{ animationDelay: '0.1s' }}
+                  ></div>
+                  <div
+                    className="h-2 w-2 animate-bounce rounded-full bg-gray-400"
+                    style={{ animationDelay: '0.2s' }}
+                  ></div>
                 </div>
               </div>
             </div>
@@ -387,7 +382,7 @@ function ChatPageContent() {
         </div>
       </ScrollArea>
 
-      {/* Input */}
+      {/* 입력 영역 */}
       <div className="border-t bg-white p-4 dark:bg-gray-800 md:p-6">
         <div className="mx-auto max-w-3xl">
           <form onSubmit={handleSubmit} className="flex gap-2 md:gap-4">
@@ -409,18 +404,14 @@ function ChatPageContent() {
             </Button>
           </form>
 
-          {/* Action Buttons */}
+          {/* 감정일기 이동 */}
           <div className="mt-3 flex flex-col items-start justify-between gap-2 sm:flex-row sm:items-center sm:gap-4 md:mt-4">
             <p className="text-xs text-gray-500">
-              AI는 실수할 수 있습니다. 심각한 상황에서는 전문가의 도움을
-              받으세요.
+              AI는 실수할 수 있습니다. 심각한 상황에서는 전문가의 도움을 받으세요.
             </p>
-
-            {/* Diary Button */}
             <Button
               variant="outline"
               onClick={() => {
-                // 최근 사용자 메시지를 감정 일기 페이지로 전달(백엔드 권위 전환 후에도 UI 편의 로직은 유지)
                 const lastUserMsg = [...messages].reverse().find((m) => m.role === 'user')
                 const diaryContent = lastUserMsg?.content || ''
                 const params = new URLSearchParams()

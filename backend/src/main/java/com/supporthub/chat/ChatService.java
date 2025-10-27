@@ -24,7 +24,17 @@ public class ChatService {
     private static final int CONTEXT_WINDOW = 12;
     private static final String MODEL = "gpt-4o-mini";
 
-    private static final String SYSTEM_PROMPT = """
+    /** ✅ 주제별 추가 지시문 (클래스 ‘안에’ 있어야 함) */
+    private static final Map<String, String> TOPIC_PROMPTS = Map.of(
+            "loneliness", "주제: 외로움. 고립감과 연결 욕구를 섬세히 반영해 주세요.",
+            "stress", "주제: 스트레스. 부담 경감과 경계 설정, 회복 루틴을 돕는 방향으로 안내해 주세요.",
+            "self-criticism", "주제: 자기비난. 자기자비와 현실적 관점 전환을 도와주세요.",
+            "depression", "주제: 우울감. 에너지 보존, 작은 행동 활성화, 안전 계획을 중점으로 다뤄주세요.",
+            "anxiety", "주제: 불안감. 호흡·그라운딩·불확실성 수용을 돕고 안심시켜 주세요.",
+            "general", "주제: 일반 대화. 사용자의 감정을 먼저 반영하고, 파악 질문을 섞어주세요."
+    );
+
+    private static final String BASE_SYSTEM_PROMPT = """
         당신은 공감적인 심리상담 조력자입니다.
         - 진단/치료를 단정적으로 제시하지 말고, 감정을 반영하며 안전한 선택을 돕습니다.
         - 자/타해 위험 신호 시 전문기관·긴급연락을 권고하세요.
@@ -50,8 +60,8 @@ public class ChatService {
                 .content(req.userMessage())
                 .build());
 
-        // 3) 컨텍스트 구성
-        List<Map<String, Object>> context = buildContext(conv.getId(), req.userMessage());
+        // 3) 컨텍스트 구성 (주제 프롬프트 주입)
+        List<Map<String, Object>> context = buildContext(conv.getId(), req.userMessage(), req.topic());
 
         // 4) ✅ OpenAI 모델 호출
         String assistant = safeAskModel(MODEL, context);
@@ -66,12 +76,15 @@ public class ChatService {
         return ChatResponse.of(conv.getId(), assistant);
     }
 
-    private List<Map<String, Object>> buildContext(Long convId, String lastUserMessage) {
+    private List<Map<String, Object>> buildContext(Long convId, String lastUserMessage, String topic) {
         var recent = msgRepo.findTop50ByConversationIdOrderByCreatedAtDesc(convId);
         Collections.reverse(recent); // 시간 오름차순
 
+        String topicKey = (topic == null || topic.isBlank()) ? "general" : topic;
+        String topicPrompt = TOPIC_PROMPTS.getOrDefault(topicKey, TOPIC_PROMPTS.get("general"));
+
         List<Map<String, Object>> msgs = new ArrayList<>();
-        msgs.add(Map.of("role", "system", "content", SYSTEM_PROMPT));
+        msgs.add(Map.of("role", "system", "content", BASE_SYSTEM_PROMPT + "\n\n" + topicPrompt));
 
         int start = Math.max(0, recent.size() - CONTEXT_WINDOW);
         for (int i = start; i < recent.size(); i++) {

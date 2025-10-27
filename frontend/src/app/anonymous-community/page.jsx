@@ -8,247 +8,241 @@ import { Textarea } from '@/components/ui/textarea'
 import { Input } from '@/components/ui/input'
 import { Heart, MessageCircle, Loader2 } from 'lucide-react'
 import { toast } from 'sonner'
+import { apiCommunity } from '@/lib/api'
+import { useAuth } from '@/contexts/AuthContext'
 
 function EmotionCircle({ label }) {
-  const smallFont = label.length >= 4
+  const smallFont = label?.length >= 4
   return (
     <div
       className="flex h-9 w-9 items-center justify-center rounded-full border border-neutral-300 bg-white text-neutral-700 shadow-[inset_0_0_0_1px_rgba(0,0,0,0.02)]"
       aria-label={`감정: ${label}`}
       title={label}
     >
-      <span
-        className={
-          smallFont ? 'text-[10px] leading-none' : 'text-xs leading-none'
-        }
-      >
-        {label}
+      <span className={smallFont ? 'text-[10px] leading-none' : 'text-xs leading-none'}>
+        {label || '...'}
       </span>
     </div>
   )
 }
 
-export default function Page() {
-  const [sortType, setSortType] = useState('최신순')
+// 상대 시간 계산
+function getRelativeTime(isoString) {
+  if (!isoString) return ''
+  const now = new Date()
+  const t = new Date(isoString)
+  const diffMin = Math.floor((now - t) / (1000 * 60))
+  if (diffMin < 1) return '방금'
+  if (diffMin < 60) return `${diffMin}분 전`
+  const diffHr = Math.floor(diffMin / 60)
+  if (diffHr < 24) return `${diffHr}시간 전`
+  const diffDay = Math.floor(diffHr / 24)
+  return `${diffDay}일 전`
+}
+
+export default function CommunityPage() {
+  const { user, token } = useAuth()
+
+  // 서버 sort 파라미터: latest | likes | comments
+  const [sortType, setSortType] = useState('latest')
   const [showSortPopup, setShowSortPopup] = useState(false)
+
   const [selectedEmotion, setSelectedEmotion] = useState(null)
   const [postContent, setPostContent] = useState('')
+
   const [commentInputs, setCommentInputs] = useState({})
   const [isLoading, setIsLoading] = useState(true)
-
-  const EMOTIONS = [
-    '외로움',
-    '우울',
-    '스트레스',
-    '불안',
-    '분노',
-    '슬픔',
-    '기쁨',
-    '피곤',
-  ]
-
-  // 기본 샘플 데이터
-  const defaultPosts = [
-    {
-      id: 1,
-      emotion: '외로움',
-      time: '6시간 전',
-      content: '친구들과의 약속이 취소돼서 하루 종일 혼자였어요.',
-      likes: 15,
-      liked: false,
-      comments: [{ id: 'c1', text: '같이 힘내요!', time: '1시간 전' }],
-      createdAt: new Date(Date.now() - 6 * 60 * 60 * 1000).toISOString(),
-    },
-    {
-      id: 2,
-      emotion: '우울',
-      time: '2시간 전',
-      content: '오늘 하필 중요한 일에 실수를 했어요. 너무 다운되네요.',
-      likes: 13,
-      liked: false,
-      comments: [],
-      createdAt: new Date(Date.now() - 2 * 60 * 60 * 1000).toISOString(),
-    },
-    {
-      id: 3,
-      emotion: '스트레스',
-      time: '5시간 전',
-      content: '시험 기간이라 잠을 잘 못자요. 마음이 조급해요.',
-      likes: 0,
-      liked: false,
-      comments: [],
-      createdAt: new Date(Date.now() - 5 * 60 * 60 * 1000).toISOString(),
-    },
-  ]
-
   const [posts, setPosts] = useState([])
 
-  // 상대적 시간 계산
-  const getRelativeTime = (createdAt) => {
-    const now = new Date()
-    const postTime = new Date(createdAt)
-    const diffInMinutes = Math.floor((now - postTime) / (1000 * 60))
+  const EMOTIONS = ['외로움', '우울', '스트레스', '불안', '분노', '슬픔', '기쁨', '피곤']
 
-    if (diffInMinutes < 1) return '방금'
-    if (diffInMinutes < 60) return `${diffInMinutes}분 전`
-    if (diffInMinutes < 1440) return `${Math.floor(diffInMinutes / 60)}시간 전`
-    return `${Math.floor(diffInMinutes / 1440)}일 전`
-  }
-
-  // localStorage에 데이터 저장
-  const savePostsToStorage = (postsToSave) => {
+  // 목록 로드
+  async function loadPosts(currentSort = sortType) {
     try {
-      // localStorage 사용 가능 여부 확인
-      if (typeof window === 'undefined' || !window.localStorage) {
-        console.log('localStorage를 사용할 수 없어서 저장하지 않음')
-        return
-      }
+      setIsLoading(true)
+      const data = await apiCommunity.list({ sort: currentSort })
 
-      console.log('게시글 저장 시도:', postsToSave)
-      localStorage.setItem('community-posts', JSON.stringify(postsToSave))
-      console.log('게시글 저장 완료')
-    } catch (error) {
-      console.error('게시글 저장 실패:', error)
-      toast.error('게시글 저장에 실패했습니다.')
+      const mapped = data.map((p) => ({
+        id: p.id,
+        emotion: p.emotion,
+        content: p.content,
+        createdAt: p.createdAt,
+        time: getRelativeTime(p.createdAt),
+
+        likes: p.likeCount ?? 0,
+        liked: !!p.likedByMe,
+        comments: (p.commentsPreview || []).map((c) => ({
+          id: c.id,
+          text: c.content,
+          createdAt: c.createdAt,
+          time: getRelativeTime(c.createdAt),
+        })),
+        commentCount: p.commentCount ?? (p.commentsPreview?.length || 0),
+
+        authorId: p.authorId,
+        authorNickname: p.authorNickname || '익명',
+      }))
+
+      setPosts(mapped)
+    } catch (err) {
+      console.error('게시글 목록 불러오기 실패:', err)
+      toast.error('게시글을 불러오지 못했어요.')
+    } finally {
+      setIsLoading(false)
     }
   }
 
-  // localStorage에서 데이터 로드
   useEffect(() => {
-    const loadPosts = () => {
-      try {
-        // localStorage 사용 가능 여부 확인
-        if (typeof window === 'undefined' || !window.localStorage) {
-          console.log('localStorage를 사용할 수 없음')
-          setPosts(defaultPosts)
-          setIsLoading(false)
-          return
-        }
-
-        const savedPosts = localStorage.getItem('community-posts')
-        console.log('저장된 게시글 데이터:', savedPosts)
-        console.log('localStorage 키들:', Object.keys(localStorage))
-
-        if (savedPosts && savedPosts !== 'null' && savedPosts !== 'undefined') {
-          const parsedPosts = JSON.parse(savedPosts)
-          console.log('파싱된 게시글 데이터:', parsedPosts)
-
-          // 시간 업데이트
-          const updatedPosts = parsedPosts.map((post) => ({
-            ...post,
-            time: getRelativeTime(post.createdAt),
-          }))
-          console.log('시간 업데이트된 게시글:', updatedPosts)
-          setPosts(updatedPosts)
-        } else {
-          console.log('저장된 데이터가 없음, 기본 데이터 사용')
-          // 기본 데이터 저장
-          setPosts(defaultPosts)
-          savePostsToStorage(defaultPosts)
-        }
-      } catch (error) {
-        console.error('게시글 로드 실패:', error)
-        toast.error('게시글을 불러오는데 실패했습니다.')
-        setPosts(defaultPosts)
-      } finally {
-        setIsLoading(false)
-      }
-    }
-
     loadPosts()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
-  // 좋아요 토글
-  const handleLike = (postId) => {
-    setPosts((prev) => {
-      const updatedPosts = prev.map((p) =>
-        p.id === postId
-          ? {
-              ...p,
-              liked: !p.liked,
-              likes: !p.liked ? p.likes + 1 : Math.max(0, p.likes - 1),
-            }
-          : p
-      )
-      savePostsToStorage(updatedPosts)
-      return updatedPosts
-    })
-  }
-
-  // 댓글 입력 변경
-  const handleCommentChange = (postId, value) => {
-    setCommentInputs((prev) => ({ ...prev, [postId]: value }))
-  }
-
-  // 댓글 추가
-  const handleAddComment = (postId) => {
-    const text = (commentInputs[postId] || '').trim()
-    if (!text) return
-
-    const newComment = {
-      id: `${postId}-${Date.now()}`,
-      text,
-      time: '방금',
-      createdAt: new Date().toISOString(),
+  // 글 작성
+  async function handleCreatePost() {
+    if (!user || !token) {
+      toast.error('로그인 후 이용해주세요.')
+      return
     }
 
-    setPosts((prev) => {
-      const updatedPosts = prev.map((p) =>
-        p.id === postId
-          ? {
-              ...p,
-              comments: [...p.comments, newComment],
-            }
-          : p
-      )
-      savePostsToStorage(updatedPosts)
-      return updatedPosts
-    })
-    setCommentInputs((prev) => ({ ...prev, [postId]: '' }))
-    toast.success('댓글이 등록되었습니다.')
-  }
-
-  // 게시글 삭제(카드 오른쪽 상단)
-  const handleDeletePost = (postId) => {
-    setPosts((prev) => {
-      const updatedPosts = prev.filter((p) => p.id !== postId)
-      savePostsToStorage(updatedPosts)
-      return updatedPosts
-    })
-    toast.success('게시글이 삭제되었습니다.')
-  }
-
-  // 글 올리기 후 초안 초기화
-  const handleClearDraft = () => {
-    setPostContent('')
-    setSelectedEmotion(null)
-  }
-
-  const handleCreatePost = () => {
     const content = postContent.trim()
     if (!content) {
       toast.error('내용을 입력해주세요.')
       return
     }
 
-    const newPost = {
-      id: Date.now(),
-      emotion: selectedEmotion || '기타',
-      time: '방금',
-      content,
-      likes: 0,
-      liked: false,
-      comments: [],
-      createdAt: new Date().toISOString(),
+    try {
+      const created = await apiCommunity.createPost({
+        emotion: selectedEmotion || '기타',
+        content,
+      })
+
+      const newPost = {
+        id: created.id,
+        emotion: created.emotion,
+        content: created.content,
+        createdAt: created.createdAt,
+        time: getRelativeTime(created.createdAt),
+
+        likes: created.likeCount ?? 0,
+        liked: !!created.likedByMe,
+        comments: [],
+        commentCount: created.commentCount ?? 0,
+
+        authorId: created.authorId,
+        authorNickname: created.authorNickname || '익명',
+      }
+
+      setPosts((prev) => [newPost, ...prev])
+      setPostContent('')
+      setSelectedEmotion(null)
+      toast.success('게시글이 등록되었습니다.')
+    } catch (err) {
+      console.error('글 작성 실패:', err)
+      toast.error('글 작성에 실패했습니다.')
+    }
+  }
+
+  // 글 삭제 (작성자 본인만)
+  async function handleDeletePost(postId, authorId) {
+    if (!user || !token) {
+      toast.error('로그인 후 이용해주세요.')
+      return
     }
 
-    setPosts((prev) => {
-      const updatedPosts = [newPost, ...prev]
-      savePostsToStorage(updatedPosts)
-      return updatedPosts
-    })
-    handleClearDraft()
-    toast.success('게시글이 등록되었습니다.')
+    if (user.id !== authorId) {
+      toast.error('내가 쓴 글만 삭제할 수 있어요.')
+      return
+    }
+
+    try {
+      await apiCommunity.deletePost(postId)
+      setPosts((prev) => prev.filter((p) => p.id !== postId))
+      toast.success('게시글이 삭제되었습니다.')
+    } catch (err) {
+      console.error('게시글 삭제 실패:', err)
+      toast.error('삭제에 실패했습니다.')
+    }
+  }
+
+  // 좋아요 토글
+  async function handleLike(postId) {
+    if (!user || !token) {
+      toast.error('로그인 후 이용해주세요.')
+      return
+    }
+
+    try {
+      const res = await apiCommunity.toggleLike(postId)
+      // res: { liked, likeCount }
+      setPosts((prev) =>
+        prev.map((p) =>
+          p.id === postId
+            ? { ...p, liked: res.liked, likes: res.likeCount }
+            : p
+        )
+      )
+    } catch (err) {
+      console.error('좋아요 실패:', err)
+      toast.error('좋아요 처리 중 문제가 발생했어요.')
+    }
+  }
+
+  // 댓글 작성 인풋
+  function handleCommentChange(postId, value) {
+    setCommentInputs((prev) => ({ ...prev, [postId]: value }))
+  }
+
+  // 댓글 등록
+  async function handleAddComment(postId) {
+    if (!user || !token) {
+      toast.error('로그인 후 이용해주세요.')
+      return
+    }
+
+    const text = (commentInputs[postId] || '').trim()
+    if (!text) return
+
+    try {
+      const created = await apiCommunity.createComment(postId, { content: text })
+
+      const newComment = {
+        id: created.id,
+        text: created.content,
+        createdAt: created.createdAt,
+        time: getRelativeTime(created.createdAt),
+      }
+
+      setPosts((prev) =>
+        prev.map((p) =>
+          p.id === postId
+            ? {
+                ...p,
+                comments: [...p.comments, newComment],
+                commentCount: (p.commentCount || 0) + 1,
+              }
+            : p
+        )
+      )
+
+      setCommentInputs((prev) => ({ ...prev, [postId]: '' }))
+      toast.success('댓글이 등록되었습니다.')
+    } catch (err) {
+      console.error('댓글 등록 실패:', err)
+      toast.error('댓글 등록에 실패했습니다.')
+    }
+  }
+
+  // 정렬 변경 (UI 라벨 -> 서버 sort 키)
+  async function applySort(humanLabel) {
+    const mapToQuery = {
+      최신순: 'latest',
+      좋아요순: 'likes',
+      댓글순: 'comments',
+    }
+    const q = mapToQuery[humanLabel] || 'latest'
+    setShowSortPopup(false)
+    setSortType(q)
+    await loadPosts(q)
   }
 
   return (
@@ -262,7 +256,11 @@ export default function Page() {
             onClick={() => setShowSortPopup((v) => !v)}
             className="h-9 min-w-[80px] justify-between text-sm md:h-10 md:min-w-[96px] md:text-sm"
           >
-            {sortType}
+            {sortType === 'likes'
+              ? '좋아요순'
+              : sortType === 'comments'
+              ? '댓글순'
+              : '최신순'}
             <span className="ml-1 md:ml-2">▾</span>
           </Button>
           {showSortPopup && (
@@ -270,26 +268,7 @@ export default function Page() {
               {['최신순', '댓글순', '좋아요순'].map((opt) => (
                 <button
                   key={opt}
-                  onClick={() => {
-                    setSortType(opt)
-                    setShowSortPopup(false)
-                    setPosts((prev) => {
-                      let sortedPosts = [...prev]
-                      if (opt === '최신순') {
-                        sortedPosts.sort(
-                          (a, b) =>
-                            new Date(b.createdAt) - new Date(a.createdAt)
-                        )
-                      } else if (opt === '좋아요순') {
-                        sortedPosts.sort((a, b) => b.likes - a.likes)
-                      } else if (opt === '댓글순') {
-                        sortedPosts.sort(
-                          (a, b) => b.comments.length - a.comments.length
-                        )
-                      }
-                      return sortedPosts
-                    })
-                  }}
+                  onClick={() => applySort(opt)}
                   className="w-full rounded-lg px-3 py-2 text-left text-sm hover:bg-neutral-50"
                 >
                   {opt}
@@ -306,32 +285,47 @@ export default function Page() {
           <CardTitle className="text-base md:text-base">감정 나누기</CardTitle>
         </CardHeader>
         <CardContent className="space-y-3 px-4 pb-4 md:px-6 md:pb-6">
+          {!user || !token ? (
+            <div className="rounded-lg border border-amber-300 bg-amber-50 p-3 text-sm text-amber-700">
+              로그인한 사용자만 글을 작성할 수 있어요.
+            </div>
+          ) : null}
+
           <div className="flex flex-wrap items-center gap-2">
             {EMOTIONS.map((emo) => (
               <button
                 key={emo}
                 onClick={() => setSelectedEmotion(emo)}
-                className={`rounded-full border px-3 py-1.5 text-sm md:py-1 ${
+                disabled={!user || !token}
+                className={`rounded-full border px-3 py-1.5 text-sm md:py-1 transition-transform active:scale-95 ${
                   selectedEmotion === emo
                     ? 'border-neutral-800'
                     : 'border-neutral-300'
-                } transition-transform active:scale-95`}
+                } ${!user || !token ? 'opacity-50 cursor-not-allowed' : ''}`}
                 aria-pressed={selectedEmotion === emo}
               >
                 {emo}
               </button>
             ))}
           </div>
+
           <Textarea
-            placeholder="지금 마음을 적어보세요..."
+            placeholder={
+              user && token
+                ? '지금 마음을 적어보세요...'
+                : '로그인 후에 마음을 남길 수 있어요.'
+            }
             value={postContent}
             onChange={(e) => setPostContent(e.target.value)}
-            className="min-h-[100px] text-sm md:min-h-[120px] md:text-base"
+            disabled={!user || !token}
+            className="min-h-[100px] text-sm md:min-h-[120px] md:text-base disabled:opacity-50"
           />
+
           <div className="flex justify-end">
             <Button
               onClick={handleCreatePost}
-              className="h-10 px-6 text-sm md:h-10 md:px-6 md:text-base"
+              disabled={!user || !token}
+              className="h-10 px-6 text-sm md:h-10 md:px-6 md:text-base disabled:opacity-50"
             >
               올리기
             </Button>
@@ -358,26 +352,31 @@ export default function Page() {
             <Card key={post.id} className="overflow-hidden">
               <CardHeader className="px-4 pb-2 pt-4 md:px-6 md:pt-6">
                 <div className="flex items-start justify-between">
-                  {/* 왼쪽: 아바타 + 감정 원 */}
+                  {/* 왼쪽: 아바타 + 감정 */}
                   <div className="mt-0.5 flex items-center gap-2 md:gap-3">
                     <Avatar className="h-9 w-9 md:h-10 md:w-10">
-                      <AvatarFallback className="text-sm">AN</AvatarFallback>
+                      <AvatarFallback className="text-sm">
+                        AN
+                      </AvatarFallback>
                     </Avatar>
                     <EmotionCircle label={post.emotion} />
                   </div>
 
-                  {/* 오른쪽: 시간 + 삭제하기 */}
+                  {/* 오른쪽: 시간 + (내 글이면 삭제) */}
                   <div className="flex flex-col items-end gap-1">
                     <span className="text-xs text-neutral-500 md:text-sm">
                       {post.time}
                     </span>
-                    <Button
-                      variant="ghost"
-                      className="h-7 px-2 text-xs text-red-600 hover:text-red-700 md:h-7 md:px-2 md:text-xs"
-                      onClick={() => handleDeletePost(post.id)}
-                    >
-                      삭제하기
-                    </Button>
+
+                    {user && token && user.id === post.authorId ? (
+                      <Button
+                        variant="ghost"
+                        className="h-7 px-2 text-xs text-red-600 hover:text-red-700 md:h-7 md:px-2 md:text-xs"
+                        onClick={() => handleDeletePost(post.id, post.authorId)}
+                      >
+                        삭제하기
+                      </Button>
+                    ) : null}
                   </div>
                 </div>
               </CardHeader>
@@ -387,15 +386,16 @@ export default function Page() {
                   {post.content}
                 </p>
 
-                {/* 액션바 */}
+                {/* 좋아요 / 댓글수 */}
                 <div className="mt-1 flex items-center gap-4">
                   <button
                     onClick={() => handleLike(post.id)}
+                    disabled={!user || !token}
                     className={`flex items-center gap-1 text-sm transition active:scale-95 ${
                       post.liked
                         ? 'text-red-600'
                         : 'text-neutral-600 hover:text-neutral-800'
-                    }`}
+                    } ${!user || !token ? 'opacity-50 cursor-not-allowed' : ''}`}
                     aria-label="좋아요"
                   >
                     <Heart
@@ -407,11 +407,11 @@ export default function Page() {
 
                   <div className="flex items-center gap-1 text-sm text-neutral-600">
                     <MessageCircle className="h-5 w-5" aria-hidden />
-                    <span>{post.comments.length}</span>
+                    <span>{post.commentCount ?? post.comments.length}</span>
                   </div>
                 </div>
 
-                {/* 댓글 목록 */}
+                {/* 댓글 목록 프리뷰 */}
                 {post.comments.length > 0 && (
                   <div className="mt-2 space-y-2 rounded-lg bg-neutral-50 p-3">
                     {post.comments.map((c) => (
@@ -421,7 +421,7 @@ export default function Page() {
                       >
                         <p className="text-sm text-neutral-800">{c.text}</p>
                         <span className="shrink-0 text-xs text-neutral-500">
-                          {c.createdAt ? getRelativeTime(c.createdAt) : c.time}
+                          {c.time}
                         </span>
                       </div>
                     ))}
@@ -431,8 +431,13 @@ export default function Page() {
                 {/* 댓글 입력 */}
                 <div className="flex items-center gap-2">
                   <Input
-                    placeholder="댓글을 입력하세요"
+                    placeholder={
+                      user && token
+                        ? '댓글을 입력하세요'
+                        : '로그인 후 댓글을 작성할 수 있어요'
+                    }
                     value={commentInputs[post.id] ?? ''}
+                    disabled={!user || !token}
                     onChange={(e) =>
                       handleCommentChange(post.id, e.target.value)
                     }
@@ -442,10 +447,11 @@ export default function Page() {
                         handleAddComment(post.id)
                       }
                     }}
-                    className="h-10 text-sm md:h-10 md:text-base"
+                    className="h-10 text-sm md:h-10 md:text-base disabled:opacity-50"
                   />
                   <Button
-                    className="h-10 text-sm md:h-10 md:text-base"
+                    className="h-10 text-sm md:h-10 md:text-base disabled:opacity-50"
+                    disabled={!user || !token}
                     onClick={() => handleAddComment(post.id)}
                   >
                     등록
