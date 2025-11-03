@@ -69,7 +69,6 @@ function ChatPageContent() {
     },
   ])
 
-  // 입력 핸들러
   const handleUserInput = (e) => setInput(e.target.value)
 
   // ✅ 메시지 전송
@@ -83,6 +82,7 @@ function ChatPageContent() {
         description: '로그인 후 대화를 저장하고 이어서 사용할 수 있어요.',
         variant: 'destructive',
       })
+      // 로그인 유도 알림만 띄우고 진행은 계속(옵션)
     }
 
     const now = new Date()
@@ -109,7 +109,12 @@ function ChatPageContent() {
           title,
           topic: topic || 'general',
         })
-        cid = created?.id || created?.conversationId || created?.data?.id
+        // 다양한 백엔드 응답 스키마 대비
+        cid =
+          created?.id ??
+          created?.conversationId ??
+          created?.data?.id ??
+          created?.data?.conversationId
         if (!cid) throw new Error('대화 생성 실패')
         setCurrentConversationId(cid)
       }
@@ -120,28 +125,27 @@ function ChatPageContent() {
         topic: topic || 'general',
       })
 
-      // 3️⃣ 서버 응답 해석
-      let assistantMessage = null
-      if (sent?.message) assistantMessage = sent.message
-      else if (Array.isArray(sent?.messages))
-        assistantMessage = sent.messages[sent.messages.length - 1]
-      else if (typeof sent?.content === 'string')
-        assistantMessage = {
-          id: `${Date.now() + 1}`,
-          role: 'assistant',
-          content: sent.content,
-          createdAt: new Date(),
-        }
+      // 3️⃣ 서버 응답 정규화 (문자열만 뽑음)
+      const text =
+        (typeof sent === 'string' && sent) ||
+        sent?.reply ||
+        sent?.assistantMessage ||
+        sent?.message ||
+        (Array.isArray(sent?.messages)
+          ? (typeof sent.messages[sent.messages.length - 1] === 'string'
+              ? sent.messages[sent.messages.length - 1]
+              : sent.messages[sent.messages.length - 1]?.content)
+          : null) ||
+        sent?.content
 
-      // 4️⃣ 응답 없으면 fallback
-      if (!assistantMessage) {
-        assistantMessage = {
-          id: `${Date.now() + 1}`,
-          role: 'assistant',
-          content:
-            '서버에서 응답을 받지 못했어요. 잠시 후 다시 시도해 주세요.',
-          createdAt: new Date(),
-        }
+      // 4️⃣ 문자열을 메시지 객체로 변환 (없으면 fallback)
+      const assistantMessage = {
+        id: `${Date.now() + 1}`,
+        role: 'assistant',
+        content:
+          (typeof text === 'string' && text.trim()) ||
+          '서버에서 응답을 받지 못했어요. 잠시 후 다시 시도해 주세요.',
+        createdAt: new Date(),
       }
 
       setMessages((prev) => [...prev, assistantMessage])
@@ -156,6 +160,7 @@ function ChatPageContent() {
         description: msg,
         variant: 'destructive',
       })
+      // 낙관적 UI 롤백
       setMessages((prev) => prev.slice(0, -1))
       setInput(currentInput)
     } finally {
@@ -183,6 +188,7 @@ function ChatPageContent() {
           messages,
           title: `AI와의 감정 대화 - ${new Date().toLocaleDateString('ko-KR')}`,
         }),
+        credentials: 'include',
       })
       const data = await response.json()
 
@@ -224,9 +230,15 @@ function ChatPageContent() {
     }
   }
 
+  // 자동 스크롤
   useEffect(() => {
-    if (scrollAreaRef.current)
-      scrollAreaRef.current.scrollTop = scrollAreaRef.current.scrollHeight
+    if (scrollAreaRef.current) {
+      // shadcn ScrollArea 내부 컨텐츠로 스크롤 이동
+      const el = scrollAreaRef.current
+      if (el && el.scrollHeight !== undefined) {
+        el.scrollTop = el.scrollHeight
+      }
+    }
   }, [messages])
 
   useEffect(() => {

@@ -1,11 +1,11 @@
 package com.supporthub.chat.dto;
 
-/** 서버 → 클라이언트 */
 public record ChatResponse(
+        boolean ok,
         Long conversationId,
-        String assistantMessage
+        String reply
 ) {
-    public static ChatResponse of(Long conversationId, String assistantMessage) {
-        return new ChatResponse(conversationId, assistantMessage);
+    public static ChatResponse of(Long conversationId, String reply) {
+        return new ChatResponse(true, conversationId, reply);
     }
 }

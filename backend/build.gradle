@@ -31,6 +31,8 @@ dependencies {
 	implementation 'org.springframework.boot:spring-boot-starter-security'
 	implementation 'org.springframework.boot:spring-boot-starter-validation'
 	implementation 'org.springframework.boot:spring-boot-starter-actuator' // ← /actuator/health 사용 시 필요
+	implementation 'me.paulschwarz:spring-dotenv:4.0.0'
+
 
 	// --- DB ---
 	runtimeOnly 'com.mysql:mysql-connector-j'
