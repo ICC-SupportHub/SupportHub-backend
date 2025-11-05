@@ -132,26 +132,18 @@ public class ChatService {
         String raw = safeAskModel(MODEL, context);
 
         // 5) JSON 검증/수리/정규화(위기 보강 포함)
-        String json = ensureJson(raw, context, req.userMessage()); // ← 여기서 선언함
+        String json = ensureJson(raw, context, req.userMessage());
 
-        // 6) 어시스턴트 메시지 저장(JSON 전체는 DB에 저장)
+        // 6) 어시스턴트 메시지 저장(JSON 문자열 그대로 보관)
         msgRepo.save(Message.builder()
                 .conversation(conv)
                 .role(Role.ASSISTANT)
                 .content(json)
                 .build());
 
-        // 7) 프론트로는 reply 텍스트만 반환
-        try {
-            JsonNode root = MAPPER.readTree(json);
-            String replyText = root.path("reply").asText("");
-            return ChatResponse.of(conv.getId(), replyText);
-        } catch (Exception e) {
-            // 혹시 JSON 파싱 실패 시 fallback
-            return ChatResponse.of(conv.getId(), "[응답 파싱 오류]");
-        }
+        // 7) 응답
+        return ChatResponse.of(conv.getId(), json);
     }
-
 
     /** 컨텍스트: system(BASE+topic) + 최근 대화(CONTEXT_WINDOW) + 마지막 user */
     private List<Map<String, Object>> buildContext(Long convId, String lastUserMessage, String topic) {
