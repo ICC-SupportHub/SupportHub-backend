@@ -4,7 +4,7 @@ import { useSearchParams } from 'next/navigation'
 import { Textarea } from '@/components/ui/textarea'
 import { Button } from '@/components/ui/button'
 import { Label } from '@/components/ui/label'
-import { CalendarIcon, EditIcon, TrashIcon, Loader2Icon } from 'lucide-react'
+import { CalendarIcon, EditIcon, TrashIcon, Loader2 as Loader2Icon, Sparkles } from 'lucide-react'
 import { useAuth } from '@/contexts/AuthContext'
 import { apiDiary } from '@/lib/api'
 
@@ -15,6 +15,7 @@ const initialEditor = {
   isSaved: false,
   isLoading: false,
   editingDiary: null,
+  suggestions: [],        // ✅ 채팅 드래프트/AI 제안 문장
 }
 
 const initialList = {
@@ -24,6 +25,33 @@ const initialList = {
   isExpanded: false,
 }
 
+/** ✅ 한국어 감정 라벨 → 내부 키 매핑 */
+const ko2key = {
+  '외로움': 'loneliness',
+  '불안': 'anxiety',
+  '우울': 'depression',
+  '스트레스': 'stress',
+  '자기비난': 'self-criticism',
+  '분노': 'angry',
+  '슬픔': 'sad',
+  '기쁨': 'happy',
+  '즐거움': 'joy',
+  '평온': 'neutral',
+  '일반': 'general',
+}
+
+/** 후보 배열을 내부 키로 변환(최대 3개) */
+function normalizeEmotionCandidates(arr) {
+  if (!Array.isArray(arr)) return []
+  const keys = []
+  for (const label of arr) {
+    const k = ko2key[label] || label // 이미 key면 그대로
+    if (k && !keys.includes(k)) keys.push(k)
+    if (keys.length >= 3) break
+  }
+  return keys
+}
+
 export default function EmotionDiary() {
   const searchParams = useSearchParams()
   const { user } = useAuth()
@@ -31,6 +59,7 @@ export default function EmotionDiary() {
   const [editor, setEditor] = useState(initialEditor)
   const [list, setList] = useState(initialList)
 
+  /** ✅ 쿼리로 직접 전달되는 emotion/content (백업 경로) */
   useEffect(() => {
     const emotion = searchParams.get('emotion')
     const content = searchParams.get('content')
@@ -38,6 +67,39 @@ export default function EmotionDiary() {
     if (content) setEditor((p) => ({ ...p, diaryEntry: decodeURIComponent(content) }))
   }, [searchParams])
 
+  /** ✅ 채팅 → 일기 드래프트 자동 로드 (방법 A: /emotion-diary?from=chat) */
+  useEffect(() => {
+    const from = searchParams.get('from')
+    if (from !== 'chat') return
+
+    const raw = typeof window !== 'undefined' ? localStorage.getItem('supporthub_diary_draft') : null
+    if (!raw) return
+
+    try {
+      const draft = JSON.parse(raw)
+      // 이미 사용자가 입력했다면 덮어쓰지 않음
+      const hasUserInput = editor.diaryEntry.trim().length > 0 || editor.selectedEmotions.length > 0
+
+      const prefillEmotions = normalizeEmotionCandidates(draft?.emotionCandidates)
+      const prefillTextParts = []
+      if (draft?.lastUserText) prefillTextParts.push(`내 메모: ${draft.lastUserText}`)
+      if (draft?.summary) prefillTextParts.push(`AI 요약: ${draft.summary}`)
+      const preText = prefillTextParts.join('\n\n').trim()
+
+      setEditor((p) => ({
+        ...p,
+        selectedEmotions: hasUserInput ? p.selectedEmotions : prefillEmotions,
+        diaryEntry: hasUserInput ? p.diaryEntry : preText,
+        suggestions: Array.isArray(draft?.suggestions) ? draft.suggestions.slice(0, 6) : [],
+      }))
+      // 저장될 때 지우고 싶다면 handleSaveDiary에서 removeItem 처리
+    } catch {
+      // 파싱 실패는 무시
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []) // 최초 1회
+
+  /** ✅ 저장된 일기 로드 */
   useEffect(() => {
     const loadDiaries = async () => {
       try {
@@ -50,17 +112,16 @@ export default function EmotionDiary() {
                 emotions: d.emotions ?? (d.emotion ? [d.emotion] : []),
                 feedback: d.feedback ?? '',
                 createdAt: d.createdAt ?? d.created_at ?? new Date().toISOString(),
-                updatedAt:
-                  d.updatedAt ?? d.updated_at ?? d.createdAt ?? new Date().toISOString(),
+                updatedAt: d.updatedAt ?? d.updated_at ?? d.createdAt ?? new Date().toISOString(),
               }))
             : []
           setList((p) => ({ ...p, savedDiaries: normalized }))
         } else {
-          const saved = localStorage.getItem('emotion-diaries')
+          const saved = typeof window !== 'undefined' ? localStorage.getItem('emotion-diaries') : null
           if (saved) setList((p) => ({ ...p, savedDiaries: JSON.parse(saved) }))
         }
       } catch {
-        const saved = localStorage.getItem('emotion-diaries')
+        const saved = typeof window !== 'undefined' ? localStorage.getItem('emotion-diaries') : null
         if (saved) setList((p) => ({ ...p, savedDiaries: JSON.parse(saved) }))
       }
     }
@@ -74,6 +135,7 @@ export default function EmotionDiary() {
     weekday: 'long',
   })
 
+  /** ✅ 일기 저장/수정 (AI 피드백 요청 + suggestions 반영) */
   const handleSaveDiary = async () => {
     if (!(editor.selectedEmotions.length > 0 && editor.diaryEntry.trim())) {
       setEditor((p) => ({
@@ -85,7 +147,7 @@ export default function EmotionDiary() {
 
     setEditor((p) => ({ ...p, isLoading: true }))
     try {
-      // 피드백 생성(Next API Route, 필요시 백엔드 엔드포인트로 대체 가능)
+      // 피드백 생성(Next API Route → 필요시 BE로 변경)
       const res = await fetch('/api/diary-feedback', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -96,6 +158,7 @@ export default function EmotionDiary() {
       })
       const data = await res.json()
       const feedback = data?.feedback ?? ''
+      const newSuggestions = Array.isArray(data?.suggestions) ? data.suggestions.slice(0, 6) : []
 
       if (editor.editingDiary) {
         if (user) {
@@ -133,7 +196,9 @@ export default function EmotionDiary() {
               : d
           )
           setList((p) => ({ ...p, savedDiaries: updated }))
-          localStorage.setItem('emotion-diaries', JSON.stringify(updated))
+          if (typeof window !== 'undefined') {
+            localStorage.setItem('emotion-diaries', JSON.stringify(updated))
+          }
         }
       } else {
         if (user) {
@@ -147,18 +212,11 @@ export default function EmotionDiary() {
             emotions: created?.emotions ?? editor.selectedEmotions,
             content: created?.content ?? editor.diaryEntry,
             feedback: created?.feedback ?? feedback,
-            createdAt:
-              created?.createdAt ?? created?.created_at ?? new Date().toISOString(),
+            createdAt: created?.createdAt ?? created?.created_at ?? new Date().toISOString(),
             updatedAt:
-              created?.updatedAt ??
-              created?.updated_at ??
-              created?.createdAt ??
-              new Date().toISOString(),
+              created?.updatedAt ?? created?.updated_at ?? created?.createdAt ?? new Date().toISOString(),
           }
-          setList((p) => ({
-            ...p,
-            savedDiaries: [newDiary, ...p.savedDiaries],
-          }))
+          setList((p) => ({ ...p, savedDiaries: [newDiary, ...p.savedDiaries] }))
         } else {
           const newDiary = {
             id: Date.now().toString(),
@@ -168,20 +226,27 @@ export default function EmotionDiary() {
             feedback,
             createdAt: new Date().toISOString(),
           }
-          const updated = [...list.savedDiaries, newDiary]
+          const updated = [newDiary, ...list.savedDiaries]
           setList((p) => ({ ...p, savedDiaries: updated }))
-          localStorage.setItem('emotion-diaries', JSON.stringify(updated))
+          if (typeof window !== 'undefined') {
+            localStorage.setItem('emotion-diaries', JSON.stringify(updated))
+          }
         }
       }
 
-      setEditor({
-        selectedEmotions: editor.selectedEmotions,
-        diaryEntry: editor.diaryEntry,
+      // ✅ 저장 후 채팅 드래프트 정리
+      if (typeof window !== 'undefined') {
+        localStorage.removeItem('supporthub_diary_draft')
+      }
+
+      setEditor((p) => ({
+        ...p,
         aiFeedback: feedback,
         isSaved: true,
         isLoading: false,
         editingDiary: null,
-      })
+        suggestions: newSuggestions.length > 0 ? newSuggestions : p.suggestions,
+      }))
     } catch {
       setEditor((p) => ({
         ...p,
@@ -200,6 +265,7 @@ export default function EmotionDiary() {
       diaryEntry: diary.content,
       aiFeedback: diary.feedback,
       isSaved: true,
+      suggestions: [], // 편집 시엔 기존 제안 숨김
     }))
   }
 
@@ -209,12 +275,11 @@ export default function EmotionDiary() {
         await apiDiary.remove(diaryId)
       } else {
         const updated = list.savedDiaries.filter((d) => d.id !== diaryId)
-        localStorage.setItem('emotion-diaries', JSON.stringify(updated))
+        if (typeof window !== 'undefined') {
+          localStorage.setItem('emotion-diaries', JSON.stringify(updated))
+        }
       }
-      setList((p) => ({
-        ...p,
-        savedDiaries: p.savedDiaries.filter((d) => d.id !== diaryId),
-      }))
+      setList((p) => ({ ...p, savedDiaries: p.savedDiaries.filter((d) => d.id !== diaryId) }))
     } catch (e) {
       console.error('일기 삭제 실패:', e)
     }
@@ -228,6 +293,7 @@ export default function EmotionDiary() {
       isSaved: false,
       isLoading: false,
       editingDiary: null,
+      suggestions: [],
     })
 
   const getEmotionLabel = (emotion) => {
@@ -246,6 +312,7 @@ export default function EmotionDiary() {
     }
     return labels[emotion] || '보통 😐'
   }
+
 
   const getEmotionsLabel = (emotions) => {
     if (!emotions || emotions.length === 0) return '감정 없음'
@@ -277,7 +344,9 @@ export default function EmotionDiary() {
             <h1 className="text-lg font-semibold text-gray-900 dark:text-white md:text-xl">
               감정 일기
             </h1>
-            <p className="text-xs text-gray-500 dark:text-gray-400 md:text-sm">{today}</p>
+            <p className="text-xs text-gray-500 dark:text-gray-400 md:text-sm">
+              {today}
+            </p>
           </div>
         </div>
       </div>
@@ -296,9 +365,7 @@ export default function EmotionDiary() {
                   {emotions.map((emotion) => (
                     <Button
                       key={emotion.name}
-                      variant={
-                        editor.selectedEmotions.includes(emotion.name) ? 'default' : 'outline'
-                      }
+                      variant={editor.selectedEmotions.includes(emotion.name) ? 'default' : 'outline'}
                       onClick={() => {
                         setEditor((prev) => {
                           const isSelected = prev.selectedEmotions.includes(emotion.name)
@@ -350,9 +417,37 @@ export default function EmotionDiary() {
                       editingDiary: p.editingDiary,
                     }))
                   }
-                  className="min-h-[150px] text-[15px] focus-visible:ring-purple-500 md:min-h-[200px] md:text-base"
+                  className="min-h[150px] text-[15px] focus-visible:ring-purple-500 md:min-h-[200px] md:text-base"
                 />
               </div>
+
+              {/* ✅ 채팅 드래프트/피드백에서 넘어온 추천 문장 chips */}
+              {editor.suggestions.length > 0 && (
+                <div className="rounded-lg border border-purple-200 bg-purple-50 p-3 text-sm text-purple-900 dark:border-purple-700 dark:bg-purple-950 dark:text-purple-100">
+                  <div className="mb-2 flex items-center gap-2 font-semibold">
+                    <Sparkles className="h-4 w-4" />
+                    추천 문장
+                  </div>
+                  <div className="flex flex-wrap gap-2">
+                    {editor.suggestions.map((s, i) => (
+                      <button
+                        key={i}
+                        type="button"
+                        className="rounded-full border border-purple-300 bg-white px-3 py-1 text-xs hover:bg-purple-100 dark:bg-transparent"
+                        onClick={() =>
+                          setEditor((p) => ({
+                            ...p,
+                            diaryEntry: p.diaryEntry ? `${p.diaryEntry}\n\n${s}` : s,
+                          }))
+                        }
+                        title="클릭하여 본문에 추가"
+                      >
+                        {s}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
 
               {(() => {
                 const ok =
@@ -451,13 +546,9 @@ export default function EmotionDiary() {
                         )}
                       </p>
                       <p className="text-sm font-medium">
-                        {getEmotionsLabel(
-                          diary.emotions || (diary.emotion ? [diary.emotion] : [])
-                        )}
+                        {getEmotionsLabel(diary.emotions || (diary.emotion ? [diary.emotion] : []))}
                       </p>
-                      <p className="mt-1 text-xs text-gray-400 dark:text-gray-500">
-                        클릭하여 상세보기
-                      </p>
+                      <p className="mt-1 text-xs text-gray-400 dark:text-gray-500">클릭하여 상세보기</p>
                     </div>
                   ))
               )}
@@ -478,7 +569,7 @@ export default function EmotionDiary() {
 
       {/* 상세 모달 */}
       {list.selectedDiary && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-50">
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
           <div className="max-h-[80vh] w-full max-w-2xl overflow-y-auto rounded-lg bg-white shadow-xl dark:bg-gray-800">
             <div className="p-6">
               <div className="mb-4 flex items-center justify-between">

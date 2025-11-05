@@ -6,108 +6,95 @@ import com.supporthub.chat.entity.Conversation;
 import com.supporthub.chat.entity.Message;
 import com.supporthub.chat.repo.ConversationRepository;
 import com.supporthub.chat.repo.MessageRepository;
+import com.supporthub.user.User;
 import com.supporthub.user.UserRepository;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.Authentication;
-import org.springframework.security.core.context.SecurityContextHolder;
+import org.springframework.security.core.userdetails.UserDetails;
+import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.bind.annotation.*;
 
-import java.util.Collections;
 import java.util.List;
-import java.util.Map;
 
 @RestController
 @RequestMapping("/api/conversations")
 @RequiredArgsConstructor
 public class ConversationController {
 
+    private final ChatService chatService;
     private final ConversationRepository convRepo;
     private final MessageRepository msgRepo;
     private final UserRepository userRepo;
-    private final ChatService chatService;
 
-    /** ✅ JWT 인증 사용자 userId 추출 */
-    private Long currentUserId() {
-        Authentication auth = SecurityContextHolder.getContext().getAuthentication();
-        if (auth == null || !(auth.getPrincipal() instanceof org.springframework.security.core.userdetails.User user)) {
-            throw new IllegalStateException("인증되지 않은 사용자입니다.");
-        }
-        String email = user.getUsername();
-        return userRepo.findByEmail(email)
-                .map(u -> u.getId())
-                .orElseThrow(() -> new IllegalStateException("사용자 정보를 찾을 수 없습니다."));
+    /** ✅ 모든 대화 삭제 (새 대화 시작용) */
+    @DeleteMapping("/reset")
+    @Transactional  // ✅ 반드시 추가 — 트랜잭션 안에서 삭제 실행
+    public ResponseEntity<Void> resetConversations(Authentication auth) {
+        Long userId = getUserId(auth);
+        convRepo.deleteAllByUserId(userId);
+        return ResponseEntity.noContent().build();
     }
 
-    /** ✅ 대화 목록 조회 */
-    @GetMapping
-    public List<Conversation> list() {
-        Long userId = currentUserId();
-        return convRepo.findByUserIdOrderByUpdatedAtDesc(userId);
-    }
-
-    /** ✅ 메시지 히스토리 (최근 50개, 시간 오름차순) */
-    @GetMapping("/{id}/messages")
-    public ResponseEntity<List<Message>> history(@PathVariable Long id) {
-        var msgs = msgRepo.findTop50ByConversationIdOrderByCreatedAtDesc(id);
-        Collections.reverse(msgs);
-        return ResponseEntity.ok(msgs);
-    }
-
-    /** ✅ 새 대화 생성 */
-    public record CreateConversationRequest(String title, String topic) {}
-
-    @PostMapping
-    public ResponseEntity<Conversation> create(@RequestBody(required = false) CreateConversationRequest req) {
-        Long userId = currentUserId();
-        Conversation c = convRepo.save(
-                Conversation.builder()
-                        .userId(userId)
-                        .title(req == null ? "새 상담" : req.title())
-                        .build()
-        );
-        return ResponseEntity.ok(c);
-    }
-
-    /**
-     * ✅ 메시지 전송 (topic 포함)
-     * 프론트엔드 → POST /api/conversations/{id}/messages
-     * body: { "userMessage": "...", "topic": "stress" }
-     */
-    @PostMapping("/{id}/messages")
-    public ResponseEntity<ChatResponse> sendMessage(
-            @PathVariable Long id,
-            @RequestBody Map<String, Object> body
+    /** ✅ 특정 대화 메시지 불러오기 */
+    @GetMapping("/{conversationId}/messages")
+    public ResponseEntity<List<Message>> getMessages(
+            @PathVariable Long conversationId,
+            Authentication auth
     ) {
-        Long userId = currentUserId();
-        String userMessage = (String) body.get("userMessage");
-        String topic = (String) body.get("topic");
+        Long userId = getUserId(auth);
+        Conversation conv = convRepo.findById(conversationId)
+                .filter(c -> c.getUserId().equals(userId))
+                .orElseThrow(() ->
+                        new IllegalArgumentException("해당 대화가 없거나 접근 권한이 없습니다."));
 
-        ChatResponse res = chatService.replySync(userId, new ChatRequest(id, userMessage, topic));
+        List<Message> messages = msgRepo.findByConversationIdOrderByCreatedAtAsc(conversationId);
+        return ResponseEntity.ok(messages);
+    }
+
+    /** ✅ 새 메시지 전송 (AI 응답 포함) */
+    @PostMapping("/{conversationId}/messages")
+    public ResponseEntity<ChatResponse> sendMessage(
+            @PathVariable Long conversationId,
+            @RequestBody ChatRequest req,
+            Authentication auth
+    ) {
+        Long userId = getUserId(auth);
+        ChatRequest fixedReq = new ChatRequest(conversationId, req.userMessage(), req.topic());
+        ChatResponse res = chatService.replySync(userId, fixedReq);
         return ResponseEntity.ok(res);
     }
 
-    /** ✅ 제목 수정 */
-    public record UpdateTitleRequest(String title) {}
-
-    @PatchMapping("/{id}")
-    public ResponseEntity<Conversation> updateTitle(@PathVariable Long id, @RequestBody UpdateTitleRequest req) {
-        Long userId = currentUserId();
-        Conversation c = convRepo.findById(id)
-                .filter(conv -> conv.getUserId().equals(userId))
-                .orElseThrow(() -> new IllegalArgumentException("conversation not found or not yours"));
-        c.setTitle(req.title());
-        return ResponseEntity.ok(convRepo.save(c));
+    /** ✅ 프론트에서 새 conversation 생성 시 */
+    @PostMapping("")
+    public ResponseEntity<Conversation> createConversation(
+            @RequestBody Conversation conv,
+            Authentication auth
+    ) {
+        Long userId = getUserId(auth);
+        conv.setUserId(userId);
+        Conversation saved = convRepo.save(conv);
+        return ResponseEntity.ok(saved);
     }
 
-    /** ✅ 대화 삭제 */
-    @DeleteMapping("/{id}")
-    public ResponseEntity<Void> delete(@PathVariable Long id) {
-        Long userId = currentUserId();
-        Conversation c = convRepo.findById(id)
-                .filter(conv -> conv.getUserId().equals(userId))
-                .orElseThrow(() -> new IllegalArgumentException("conversation not found or not yours"));
-        convRepo.delete(c);
-        return ResponseEntity.noContent().build();
+    /** ✅ 인증 객체에서 userId 안전하게 추출 */
+    private Long getUserId(Authentication auth) {
+        Object principal = auth.getPrincipal();
+
+        // 1️⃣ Long 타입일 경우
+        if (principal instanceof Long userId) {
+            return userId;
+        }
+
+        // 2️⃣ 이메일 기반 UserDetails
+        if (principal instanceof UserDetails userDetails) {
+            String email = userDetails.getUsername();
+            return userRepo.findByEmail(email)
+                    .map(User::getId)
+                    .orElseThrow(() ->
+                            new IllegalStateException("userId를 찾을 수 없습니다. email=" + email));
+        }
+
+        throw new IllegalStateException("userId 추출 실패: principal=" + principal);
     }
 }

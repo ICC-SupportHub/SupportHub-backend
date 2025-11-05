@@ -1,5 +1,6 @@
 package com.supporthub.chat.entity;
 
+import com.fasterxml.jackson.annotation.JsonIgnore; // ✅ 추가
 import jakarta.persistence.*;
 import lombok.*;
 import java.time.LocalDateTime;
@@ -21,6 +22,7 @@ public class Message {
 
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "conversation_id", nullable = false)
+    @JsonIgnore   // ✅ 이 줄이 핵심! (무한 참조 방지)
     private Conversation conversation;
 
     @Enumerated(EnumType.STRING)

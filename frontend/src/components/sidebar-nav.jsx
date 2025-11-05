@@ -4,7 +4,6 @@ import { usePathname, useRouter } from 'next/navigation'
 import { cn } from '@/lib/utils'
 import { Button } from '@/components/ui/button'
 import { ScrollArea } from '@/components/ui/scroll-area'
-import { Separator } from '@/components/ui/separator'
 import {
   HomeIcon,
   MessageSquareIcon,
@@ -14,15 +13,15 @@ import {
   UsersIcon,
   PhoneIcon,
   PlusIcon,
-  SettingsIcon,
-  MenuIcon,
-  XIcon,
   ChevronLeftIcon,
+  SettingsIcon,
   LogOutIcon,
 } from 'lucide-react'
 import { useIsMobile } from '@/components/ui/use-mobile'
 import { useState, useEffect, useRef } from 'react'
 import { useAuth } from '@/contexts/AuthContext'
+import { apiChat } from '@/lib/api'
+import { toast } from '@/components/ui/use-toast'
 
 export function SidebarNav({ onCollapseChange, isMobileOpen, onMobileClose }) {
   const pathname = usePathname()
@@ -33,18 +32,18 @@ export function SidebarNav({ onCollapseChange, isMobileOpen, onMobileClose }) {
   const userMenuRef = useRef(null)
   const { user, logout } = useAuth()
 
+  /** ✅ 사이드바 접기 */
   const handleCollapseToggle = () => {
     if (isMobile) {
-      // 모바일에서는 사이드바 닫기
       onMobileClose?.()
     } else {
-      // 데스크톱에서는 사이드바 축소/확장
       const newCollapsed = !isCollapsed
       setIsCollapsed(newCollapsed)
       onCollapseChange?.(newCollapsed)
     }
   }
 
+  /** ✅ 로그아웃 */
   const handleLogout = async () => {
     try {
       await logout()
@@ -55,7 +54,38 @@ export function SidebarNav({ onCollapseChange, isMobileOpen, onMobileClose }) {
     }
   }
 
-  // 드롭다운 외부 클릭 시 닫기
+  /** ✅ “새 채팅” 버튼 클릭 시 */
+  const handleNewChat = async () => {
+    try {
+      // 기존 대화 모두 삭제
+      await apiChat.resetConversations()
+      localStorage.removeItem('supporthub_cid')
+
+      toast({
+        title: '새 대화 시작 🎉',
+        description: '기존 대화가 모두 삭제되었어요.',
+      })
+
+      // ✅ ai-chat 페이지로 이동 (매번 고유한 쿼리로 완전 리셋)
+      const newParam = `?new=${Date.now()}`
+      if (pathname.startsWith('/ai-chat')) {
+        router.replace(`/ai-chat${newParam}`)
+      } else {
+        router.push(`/ai-chat${newParam}`)
+      }
+
+      if (isMobile) onMobileClose?.()
+    } catch (err) {
+      console.error('새 대화 초기화 실패:', err)
+      toast({
+        title: '삭제 실패',
+        description: '대화 초기화 중 오류가 발생했어요.',
+        variant: 'destructive',
+      })
+    }
+  }
+
+  /** ✅ 드롭다운 외부 클릭 시 닫기 */
   useEffect(() => {
     const handleClickOutside = (event) => {
       if (userMenuRef.current && !userMenuRef.current.contains(event.target)) {
@@ -66,64 +96,25 @@ export function SidebarNav({ onCollapseChange, isMobileOpen, onMobileClose }) {
     if (showUserMenu) {
       document.addEventListener('mousedown', handleClickOutside)
     }
-
     return () => {
       document.removeEventListener('mousedown', handleClickOutside)
     }
   }, [showUserMenu])
 
-  // Firebase 인증 상태는 AuthContext에서 관리됨
-
-  const mainNavItems = [
-    {
-      title: '새 대화',
-      href: '/ai-chat', // 경로 업데이트
-      icon: PlusIcon,
-      isNew: true,
-    },
-  ]
-
+  /** ✅ 네비게이션 아이템 */
   const navItems = [
-    {
-      title: '홈',
-      href: '/',
-      icon: HomeIcon,
-    },
-    {
-      title: 'AI 대화',
-      href: '/ai-chat', // 경로 업데이트
-      icon: MessageSquareIcon,
-    },
-    {
-      title: '감정 일기',
-      href: '/emotion-diary', // 경로 업데이트
-      icon: BookOpenIcon,
-    },
-    {
-      title: '감정 통계',
-      href: '/emotion-stats', // 경로 업데이트
-      icon: LineChartIcon,
-    },
-    {
-      title: '대화 주제',
-      href: '/conversation-topics', // 경로 업데이트
-      icon: BrainIcon,
-    },
-    {
-      title: '커뮤니티',
-      href: '/anonymous-community', // 경로 업데이트
-      icon: UsersIcon,
-    },
-    {
-      title: '긴급 지원',
-      href: '/emergency-support', // 경로 업데이트
-      icon: PhoneIcon,
-    },
+    { title: '홈', href: '/', icon: HomeIcon },
+    { title: 'AI 대화', href: '/ai-chat', icon: MessageSquareIcon },
+    { title: '감정 일기', href: '/emotion-diary', icon: BookOpenIcon },
+    { title: '감정 통계', href: '/emotion-stats', icon: LineChartIcon },
+    { title: '대화 주제', href: '/conversation-topics', icon: BrainIcon },
+    { title: '커뮤니티', href: '/anonymous-community', icon: UsersIcon },
+    { title: '긴급 지원', href: '/emergency-support', icon: PhoneIcon },
   ]
 
   return (
     <>
-      {/* Mobile Overlay */}
+      {/* ✅ 모바일 오버레이 */}
       {isMobile && isMobileOpen && (
         <div
           className="fixed inset-0 z-30 bg-black/50 transition-opacity duration-300"
@@ -131,7 +122,7 @@ export function SidebarNav({ onCollapseChange, isMobileOpen, onMobileClose }) {
         />
       )}
 
-      {/* Sidebar */}
+      {/* ✅ 사이드바 본체 */}
       <div
         className={cn(
           'relative flex h-full flex-col border-r border-gray-200 bg-white transition-all duration-300',
@@ -143,10 +134,9 @@ export function SidebarNav({ onCollapseChange, isMobileOpen, onMobileClose }) {
           isMobile && !isMobileOpen && '-translate-x-full'
         )}
       >
-        {/* Header */}
+        {/* ✅ 헤더 */}
         <div className="p-4">
           <div className="mb-6 flex items-center gap-2">
-            {/* S Logo Box - Click to toggle sidebar */}
             <div
               className="group flex h-8 w-8 cursor-pointer items-center justify-center rounded-lg bg-gradient-to-r from-purple-500 to-pink-500 transition-transform duration-200 hover:scale-110"
               onClick={handleCollapseToggle}
@@ -162,7 +152,6 @@ export function SidebarNav({ onCollapseChange, isMobileOpen, onMobileClose }) {
               />
             </div>
 
-            {/* Text Logo - Click to go to home */}
             {!isCollapsed && (
               <Link href="/">
                 <span className="cursor-pointer align-middle text-lg font-semibold leading-none text-gray-900 hover:text-gray-700">
@@ -172,35 +161,33 @@ export function SidebarNav({ onCollapseChange, isMobileOpen, onMobileClose }) {
             )}
           </div>
 
-          {/* Description */}
           {!isCollapsed && (
             <p className="mb-4 mt-2 px-1 text-xs leading-relaxed text-gray-500">
               마음을 나누는 AI 감정공감 대화 플랫폼
             </p>
           )}
 
-          {/* New Chat Button */}
-          <Link href="/ai-chat" onClick={() => isMobile && onMobileClose?.()}>
-            <Button
-              className={cn(
-                'h-9 border border-gray-200 bg-gray-50 font-medium text-gray-700 hover:bg-gray-100',
-                isCollapsed
-                  ? 'h-8 w-8 justify-center p-0'
-                  : 'w-full justify-start px-3'
-              )}
-            >
-              <div className="flex items-center gap-2">
-                <PlusIcon className="h-4 w-4 flex-shrink-0" />
-                {!isCollapsed && <span className="truncate">새 채팅</span>}
-              </div>
-            </Button>
-          </Link>
+          {/* ✅ 새 채팅 버튼 */}
+          <Button
+            onClick={handleNewChat}
+            className={cn(
+              'h-9 border border-gray-200 bg-gray-50 font-medium text-gray-700 hover:bg-gray-100',
+              isCollapsed
+                ? 'h-8 w-8 justify-center p-0'
+                : 'w-full justify-start px-3'
+            )}
+          >
+            <div className="flex items-center gap-2">
+              <PlusIcon className="h-4 w-4 flex-shrink-0" />
+              {!isCollapsed && <span className="truncate">새 채팅</span>}
+            </div>
+          </Button>
         </div>
 
-        {/* Separator */}
-        <div className="mx-2 my-2 h-0.5 bg-gray-100"></div>
+        {/* ✅ 구분선 */}
+        <div className="mx-2 my-2 h-0.5 bg-gray-100" />
 
-        {/* Navigation */}
+        {/* ✅ 네비게이션 */}
         <ScrollArea className="flex-1 px-2">
           <div className="space-y-1 p-2">
             {navItems.map((item) => {
@@ -236,7 +223,7 @@ export function SidebarNav({ onCollapseChange, isMobileOpen, onMobileClose }) {
           </div>
         </ScrollArea>
 
-        {/* Footer */}
+        {/* ✅ 사용자 메뉴 (하단) */}
         <div
           className="relative border-t border-gray-200 p-4"
           ref={userMenuRef}
@@ -275,7 +262,6 @@ export function SidebarNav({ onCollapseChange, isMobileOpen, onMobileClose }) {
                 )}
               </div>
 
-              {/* User Menu Dropdown */}
               {showUserMenu && (
                 <div className="absolute bottom-full left-4 z-50 mb-2 w-48 rounded-lg border border-gray-200 bg-white shadow-lg">
                   <div className="py-1">
