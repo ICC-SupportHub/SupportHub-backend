@@ -11,60 +11,80 @@ import { SendIcon, BotIcon, UserIcon, BookOpenIcon } from 'lucide-react'
 import { useAuth } from '@/contexts/AuthContext'
 import { apiChat } from '@/lib/api'
 
-/** ✅ 서버가 주는 JSON(payload) → 화면용으로 파싱 */
-function parseAssistantPayload(raw) {
-  let cleaned = String(raw ?? '')
-    .replace(/```+[\s\S]*?```+/g, s => s.replace(/```/g, ''))
-    .trim()
-    .replace(/[“”]/g, '"')
-    .replace(/[‘’]/g, "'")
-
-  const first = cleaned.indexOf('{')
-  const last = cleaned.lastIndexOf('}')
-  if (first >= 0 && last > first) {
-    const candidate = cleaned.slice(first, last + 1)
-
-    try {
-      const obj = JSON.parse(candidate)
-      if (obj && typeof obj.reply === 'string') {
-        return {
-          text: obj.reply,
-          skill: obj.skill_tag || null,
-          safety: obj.safety_level || 'ok',
-          next: Array.isArray(obj.next_questions) ? obj.next_questions : [],
-          suggestions: Array.isArray(obj.suggestions) ? obj.suggestions : [],
-          diary: !!obj.diary_suggested,
-          raw: obj,
-        }
-      }
-    } catch {
-      try {
-        const fixed = candidate
-          .replace(/([{,]\s*)'([^'"]+?)'\s*:/g, '$1"$2":')
-          .replace(/:\s*'([^']*?)'(\s*[},])/g, ': "$1"$2')
-        const obj2 = JSON.parse(fixed)
-        if (obj2 && typeof obj2.reply === 'string') {
-          return {
-            text: obj2.reply,
-            skill: obj2.skill_tag || null,
-            safety: obj2.safety_level || 'ok',
-            next: Array.isArray(obj2.next_questions) ? obj2.next_questions : [],
-            suggestions: Array.isArray(obj2.suggestions) ? obj2.suggestions : [],
-            diary: !!obj2.diary_suggested,
-            raw: obj2,
-          }
-        }
-      } catch {}
+/** 서버 JSON(payload) → 화면용 파싱 (2중 파싱 + 싱글쿼트 대응 + 랩핑 따옴표 제거) */
+function parseAssistantPayload(raw: unknown) {
+  if (raw && typeof raw === 'object') {
+    const obj: any = (raw as any).reply ? raw : (raw as any).data ?? (raw as any).payload ?? (raw as any).message ?? (raw as any).content ?? raw
+    const text = obj.reply ?? obj.text ?? obj.message ?? ''
+    return {
+      text: String(text ?? '').trim() || '[응답 없음]',
+      skill: obj.skill_tag ?? obj.skill ?? null,
+      safety: obj.safety_level ?? obj.safety ?? 'ok',
+      next: Array.isArray(obj.next_questions) ? obj.next_questions : [],
+      suggestions: Array.isArray(obj.suggestions) ? obj.suggestions : [],
+      diary: !!obj.diary_suggested,
+      raw: obj,
     }
   }
-  return { text: typeof raw === 'string' ? raw : '[응답 파싱 실패]' }
+
+  let s = String(raw ?? '')
+    .replace(/```+[\s\S]*?```+/g, m => m.replace(/```/g, ''))
+    .replace(/[“”]/g, '"')
+    .replace(/[‘’]/g, "'")
+    .trim()
+
+  if ((s.startsWith('"') && s.endsWith('"')) || (s.startsWith("'") && s.endsWith("'"))) {
+    s = s.slice(1, -1)
+  }
+
+  const tryJson = (txt: string) => { try { return JSON.parse(txt) } catch { return null } }
+
+  let obj: any = tryJson(s)
+  if (typeof obj === 'string') obj = tryJson(obj)
+
+  if (!obj || typeof obj !== 'object') {
+    const first = s.indexOf('{')
+    const last = s.lastIndexOf('}')
+    if (first >= 0 && last > first) {
+      const candidate = s.slice(first, last + 1)
+      obj = tryJson(candidate) || tryJson(
+        candidate
+          .replace(/([{,]\s*)'([^'"]+?)'\s*:/g, '$1"$2":')
+          .replace(/:\s*'([^']*?)'(\s*[},])/g, ': "$1"$2')
+      )
+      if (typeof obj === 'string') obj = tryJson(obj)
+    }
+  }
+
+  if (obj && typeof obj === 'object') {
+    const text = obj.reply ?? obj.text ?? obj.message ?? ''
+    return {
+      text: String(text ?? '').trim() || '[응답 없음]',
+      skill: obj.skill_tag ?? obj.skill ?? null,
+      safety: obj.safety_level ?? obj.safety ?? 'ok',
+      next: Array.isArray(obj.next_questions) ? obj.next_questions : [],
+      suggestions: Array.isArray(obj.suggestions) ? obj.suggestions : [],
+      diary: !!obj.diary_suggested,
+      raw: obj,
+    }
+  }
+
+  const m1 = s.match(/"reply"\s*:\s*"([\s\S]*?)"/)
+  const m2 = s.match(/'reply'\s*:\s*'([\s\S]*?)'/)
+  const picked = m1?.[1] ?? m2?.[1]
+  if (picked) {
+    const unescaped = picked.replace(/\\"/g, '"').replace(/\\n/g, '\n')
+    return { text: unescaped.trim(), raw: s }
+  }
+
+  return { text: s || '[응답 파싱 실패]' }
 }
 
-/** ✅ 간단 감정 후보 추출 */
-function detectEmotionCandidates(messages, topic) {
+/** 간단 감정 후보 추출 */
+function detectEmotionCandidates(messages: any[], topic?: string) {
   const text = messages.slice(-6).map(m => m.content || '').join(' ')
-  const picked = new Set()
-  const addIf = (cond, label) => { if (cond && picked.size < 3) picked.add(label) }
+  const picked = new Set<string>()
+  const addIf = (cond: boolean, label: string) => { if (cond && picked.size < 3) picked.add(label) }
 
   addIf(/외롭|고립|혼자|쓸쓸/.test(text) || topic === 'loneliness', '외로움')
   addIf(/불안|초조|긴장|두근|걱정/.test(text) || topic === 'anxiety', '불안')
@@ -79,22 +99,21 @@ function detectEmotionCandidates(messages, topic) {
 }
 
 function ChatPageContent() {
-  const bottomRef = useRef(null)
-  const inputRef = useRef(null)
+  const bottomRef = useRef<HTMLDivElement | null>(null)
+  const inputRef = useRef<HTMLInputElement | null>(null)
   const searchParams = useSearchParams()
   const router = useRouter()
   const { user } = useAuth()
   const topic = searchParams.get('topic') || undefined
   const isNewChat = searchParams.get('new')
 
-  const [currentConversationId, setCurrentConversationId] = useState(null)
+  const [currentConversationId, setCurrentConversationId] = useState<string | null>(null)
   const [input, setInput] = useState('')
   const [isLoading, setIsLoading] = useState(false)
-  const [messages, setMessages] = useState([])
+  const [messages, setMessages] = useState<any[]>([])
 
-  /** ✅ 초기 인사 */
-  const getInitialMessage = (topic) => {
-    const msgs = {
+  const getInitialMessage = (topic?: string) => {
+    const msgs: Record<string, string> = {
       loneliness: '안녕하세요! 저는 감정을 함께 나누는 공감 AI입니다. 😊\n요즘 외로움이 잦다면, 어떤 순간에 가장 크게 올라오는지부터 들어볼게요.',
       stress: '안녕하세요! 저는 감정을 이해하고 도와드리는 공감 AI입니다. 🌿\n요즘 스트레스가 많으셨군요. 지금 바로 가볍게 줄일 수 있는 한 가지부터 찾아봐요.',
       'self-criticism': '안녕하세요! 저는 당신의 마음을 다정하게 비춰주는 공감 AI입니다. 🤗\n요즘 스스로에게 엄격해진 순간이 있었나요?',
@@ -105,7 +124,7 @@ function ChatPageContent() {
     return (topic && msgs[topic]) || msgs.general
   }
 
-  /** ✅ 대화 로드 */
+  /** 대화 로드 */
   useEffect(() => {
     const loadConversation = async () => {
       if (isNewChat) {
@@ -120,13 +139,21 @@ function ChatPageContent() {
         setCurrentConversationId(savedCid)
         try {
           const history = await apiChat.getMessages(savedCid)
-          const hydrated = (Array.isArray(history) ? history : []).map((m) => {
-            if (m.role === 'assistant') {
+
+          const hydrated = (Array.isArray(history) ? history : []).map((m: any) => {
+            const role = String(m.role ?? '').toLowerCase() // ✅ 역할 정규화
+            const createdAt = m.createdAt ? new Date(m.createdAt) : new Date()
+
+            if (role === 'assistant') {
               const parsed = parseAssistantPayload(m.content)
-              return { id: m.id || Math.random().toString(), role: 'assistant', content: parsed.text, meta: parsed, createdAt: m.createdAt || new Date() }
+              return { id: m.id || Math.random().toString(), role: 'assistant', content: parsed.text, meta: parsed, createdAt }
             }
-            return { id: m.id || Math.random().toString(), role: m.role, content: m.content, meta: null, createdAt: m.createdAt || new Date() }
+            if (role === 'user') {
+              return { id: m.id || Math.random().toString(), role: 'user', content: m.content, meta: null, createdAt }
+            }
+            return { id: m.id || Math.random().toString(), role, content: typeof m.content === 'string' ? m.content : JSON.stringify(m.content ?? ''), meta: null, createdAt }
           })
+
           setMessages(hydrated.length > 0 ? hydrated : [{ id: 'welcome', role: 'assistant', content: getInitialMessage(topic), meta: null, createdAt: new Date() }])
         } catch {
           setMessages([{ id: 'welcome', role: 'assistant', content: getInitialMessage(topic), meta: null, createdAt: new Date() }])
@@ -138,8 +165,8 @@ function ChatPageContent() {
     loadConversation()
   }, [isNewChat, topic])
 
-  /** ✅ 전송 */
-  const handleSubmit = async (e) => {
+  /** 전송 */
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
     if (!input.trim() || isLoading) return
 
@@ -160,14 +187,23 @@ function ChatPageContent() {
       if (!cid) {
         const title = `AI와의 감정 대화 - ${new Date().toLocaleDateString('ko-KR')}`
         const created = await apiChat.createConversation({ title, topic: topic || 'general' })
-        cid = created?.id ?? created?.conversationId
+        cid = (created as any)?.id ?? (created as any)?.conversationId
         if (!cid) throw new Error('대화 생성 실패')
         setCurrentConversationId(cid)
         localStorage.setItem('supporthub_cid', cid)
       }
 
-      const sent = await apiChat.sendMessage(cid, { userMessage: currentInput, topic: topic || 'general' })
-      const raw = sent?.reply || sent?.assistantMessage || sent?.message || sent?.content || ''
+      const sent: any = await apiChat.sendMessage(cid, { userMessage: currentInput, topic: topic || 'general' })
+
+      const raw =
+        sent?.reply ??
+        sent?.assistantMessage ??
+        sent?.message ??
+        sent?.content ??
+        sent?.data ??
+        sent?.payload ??
+        sent
+
       const parsed = parseAssistantPayload(raw)
 
       setMessages(prev => [...prev, { id: `${Date.now() + 1}`, role: 'assistant', content: parsed.text || '서버 응답이 없습니다.', meta: parsed, createdAt: new Date() }])
@@ -182,11 +218,11 @@ function ChatPageContent() {
   useEffect(() => { bottomRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' }) }, [messages])
   useEffect(() => { inputRef.current?.focus() }, [])
 
-  /** ✅ 감정일기 저장 */
+  /** 감정일기 저장 */
   const handleSaveToDiary = () => {
     try {
-      const lastAssistant = [...messages].reverse().find(m => m.role === 'assistant')
-      const lastUser = [...messages].reverse().find(m => m.role === 'user')
+      const lastAssistant = [...messages].reverse().find(m => String(m.role).toLowerCase() === 'assistant')
+      const lastUser = [...messages].reverse().find(m => String(m.role).toLowerCase() === 'user')
 
       const draft = {
         from: 'chat',
@@ -234,7 +270,7 @@ function ChatPageContent() {
       <ScrollArea className="flex-1 px-4 md:px-6">
         <div className="mx-auto max-w-3xl space-y-4 py-4 md:space-y-6 md:py-6">
           {messages.map((m) => {
-            const isUser = m.role === 'user'
+            const isUser = String(m.role || '').toLowerCase() === 'user'
             const meta = m.meta
             return (
               <div key={m.id} className={`flex gap-2 ${isUser ? 'flex-row-reverse' : ''}`}>
@@ -273,7 +309,7 @@ function ChatPageContent() {
 
                         {Array.isArray(meta.suggestions) && meta.suggestions.length > 0 && (
                           <div className="flex flex-wrap gap-2">
-                            {meta.suggestions.slice(0, 5).map((s, i) => (
+                            {meta.suggestions.slice(0, 5).map((s: string, i: number) => (
                               <button
                                 key={i}
                                 type="button"

@@ -81,17 +81,15 @@ export default function EmotionDiary() {
       const hasUserInput = editor.diaryEntry.trim().length > 0 || editor.selectedEmotions.length > 0
 
       const prefillEmotions = normalizeEmotionCandidates(draft?.emotionCandidates)
-      const prefillTextParts = []
-      if (draft?.lastUserText) prefillTextParts.push(`내 메모: ${draft.lastUserText}`)
-      if (draft?.summary) prefillTextParts.push(`AI 요약: ${draft.summary}`)
-      const preText = prefillTextParts.join('\n\n').trim()
 
       setEditor((p) => ({
         ...p,
+        // ✅ 감정만 프리필, 본문은 비워둠
         selectedEmotions: hasUserInput ? p.selectedEmotions : prefillEmotions,
-        diaryEntry: hasUserInput ? p.diaryEntry : preText,
+        diaryEntry: hasUserInput ? p.diaryEntry : '',
         suggestions: Array.isArray(draft?.suggestions) ? draft.suggestions.slice(0, 6) : [],
       }))
+
       // 저장될 때 지우고 싶다면 handleSaveDiary에서 removeItem 처리
     } catch {
       // 파싱 실패는 무시
